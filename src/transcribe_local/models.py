@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import tarfile
 import tomllib
 from dataclasses import dataclass
@@ -111,9 +112,16 @@ def endpoint_rewrite(url: str) -> str:
 
 
 def download(model_id: str, on_progress=None) -> Path:
+    """下到 `<名字>.part`，校验过了才改成正式名字。
+
+    ⚠️ 这个 .part 不是洁癖，是修一个真 bug：以前直接下成正式名字，
+    半路断掉留下的半截文件会被 installed() 当成「已装」跳过，用户再怎么重跑都修不回来 ——
+    一个坏了的模型比没装更难查。同理，压缩包先解到临时目录、整体改名，
+    免得解压中途断电留下一个半拉目录冒充装好了。
+    """
     e = manifest()[model_id]
     cache_dir().mkdir(parents=True, exist_ok=True)
-    blob = cache_dir() / e.filename
+    blob = cache_dir() / (e.filename + ".part")
     url = endpoint_rewrite(e.url)
 
     total = _remote_size(url)
@@ -139,12 +147,24 @@ def download(model_id: str, on_progress=None) -> Path:
                 break
 
     _verify(e, blob)
-    if e.archive.startswith("tar"):
-        with tarfile.open(blob) as tf:
-            tf.extractall(cache_dir(), filter="data")
-        blob.unlink()
-        return model_dir(model_id)
-    return blob
+    if not e.archive.startswith("tar"):
+        final = cache_dir() / e.filename
+        blob.replace(final)
+        return final
+
+    stage = cache_dir() / (e.dirname + ".part")
+    shutil.rmtree(stage, ignore_errors=True)
+    stage.mkdir(parents=True)
+    with tarfile.open(blob) as tf:
+        tf.extractall(stage, filter="data")
+    inner = stage / e.dirname                       # 归档里一般还包一层同名目录
+    src = inner if inner.is_dir() else stage
+    dst = model_dir(model_id)
+    shutil.rmtree(dst, ignore_errors=True)
+    src.rename(dst)
+    shutil.rmtree(stage, ignore_errors=True)
+    blob.unlink(missing_ok=True)
+    return dst
 
 
 def _remote_size(url: str) -> int:
