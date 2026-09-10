@@ -87,7 +87,8 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 
 ## 待办
 
-- [ ] 用简化版提示词重跑全长，把 README 里的成绩数字换成实测值
+- [ ] **同配置各跑 3 遍取均值，换掉 README 里那张表的单样本数字。**
+      现在那些数是各跑一次的结果（已在 README 里注明不是平均值）。这一步方差很大，单样本会骗人。
 - [ ] 逐个核实模型许可，补齐 `models/manifest.toml` 的 `license` 与 `sha256`
 - [ ] BSL 的 Licensor 与 Change Date 填成真实值（`LICENSE` 里有 TODO 标记）
 - [ ] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 装一次、敲一行命令起服务，界面在浏览器里开。
