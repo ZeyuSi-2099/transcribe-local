@@ -69,6 +69,34 @@ def _ts(x: float) -> str:
     return f"{int(x) // 60:02d}:{x - (int(x) // 60) * 60:04.1f}"
 
 
+MARK = "[❓]"
+
+
+def _blank(line: str) -> bool:
+    """这一行除了标点和 [❓] 之外一个字都没有 —— 那不是标存疑，是这块话丢了。"""
+    body = re.sub(r"^\s*\[[^\]]*\]\s*[MR]?\s*[:：]?\s*", "", line).replace(MARK, "")
+    return not re.search(r"[0-9A-Za-z\u4e00-\u9fff]", body)
+
+
+def _revive(block: str) -> str:
+    """把写空了的那一块按各路票数最多的原文填回去，并标 [❓] 送进复核。
+
+    ⚠️ 这是兜底，不是功能：提示词里已经写了「每块都必须有文字」，但提示词是请求、
+    代码才是保证 —— 「内容不能丢」是红线，不能只靠模型照做。
+    """
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    m = re.match(r"^(\[[^\]]*\]\s*[MR]?\s*[:：]\s*)(.*)$", lines[0])
+    prefix, main = (m.group(1), m.group(2)) if m else ("", lines[0])
+    cands = [main] + [re.sub(r"^\[[A-Z0-9]+\]\s*", "", ln) for ln in lines[1:]]
+    cands = [c.strip() for c in cands if c.strip()]
+    if not cands:
+        return ""
+    best = max(cands, key=lambda c: (cands.count(c), c == main))      # 票数优先，同票取顶格那一路
+    return f"{prefix}{best} {MARK}"
+
+
 def fuse(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> str:
     p3 = cfg["p3"]
     blocks = [b for b in p3_input.split("\n\n") if b.strip()]
@@ -96,7 +124,19 @@ def fuse(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> st
         if len(lines) != keep:
             print(f"⚠️ 第 {n}/{len(batches)} 批要 {keep} 行，模型给了 {len(lines)} 行 —— 块数对不上，"
                   f"这一批可能有内容丢失，建议调小 p3.blocks_per_call 重跑")
-        out += lines[-keep:] if len(lines) >= keep else lines
+        kept = lines[-keep:] if len(lines) >= keep else lines
+        src = chunk[-keep:]
+        if len(kept) == len(src):          # 行数对不上时不敢按位置认块，会把内容贴错人
+            for j, ln in enumerate(kept):
+                if not _blank(ln):
+                    continue
+                fixed = _revive(src[j])
+                if not fixed:
+                    continue
+                kept[j] = fixed
+                print(f"⚠️ 第 {lo + len(chunk) - keep + j + 1} 块被写成了空块（只有 {MARK}、没有字）。"
+                      f"已按各路票数最多的原文填回并标 {MARK}，请复核。")
+        out += kept
         if on_batch:
             on_batch(n, len(batches))
     return "\n".join(out) + "\n"
