@@ -1,0 +1,100 @@
+# CLAUDE.md
+
+## 这是什么
+
+**Transcribe Local** —— [Transcribe](https://transcribe.solutions) 的本地开源版。
+四台解码路线互不相同的本地 ASR 转同一段录音，用代码穷举定位分歧，再交给一个大模型定字。
+全程本机、不联网、不上传。
+
+**这是一个要公开的仓库。** 写任何东西之前先想一遍：这行内容公开了会怎样。
+
+## 三条红线
+
+1. **客户音频、金标、逐条人工判定，永远不进这个仓库。** `.gitignore` 按扩展名挡了音频，
+   但文本形式的转录内容挡不住 —— 靠人。示例音频只能用公共域素材。
+2. **密钥只从环境变量读。** 不写进配置文件、不进日志、不进报错信息。
+3. **内容不能丢。** 任何一步都不许静默删掉识别出来的内容 —— 删掉的话用户在稿子上看不见、
+   也进不了复核队列，等于悄悄丢了话还不留痕。定不下来的字标 `[❓]`，不要抹掉。
+
+## 与上游的关系
+
+研究在内部仓 `ASR-Optimizer`（私有）里做 —— 横评、金标、逐条判定、否决记录都在那边。
+这个仓库只拿走**已经定下来的结果**。单向同步，开源仓不回写研究数据。
+
+社区提的参数改进，先在内部仓复测，再进这里的默认值。
+
+## 架构
+
+```
+音频 → P0 转码
+     → 声纹分段（pyannote-segmentation-3.0 + CAM++）+ VAD 补漏 → 18 秒切块
+     → P1 四路 ASR 并行（吃同一份切块）
+     → 分歧册（纯 Python 穷举定位写法不一致的片段）
+     → P3 大模型定字（OpenAI 协议）
+     → 导出
+```
+
+**没有 P2。** 四路吃同一份切块 + 同一份声纹分段，第 N 块在四路里是同一段音频，对齐是恒等的。
+云端生产线的 P2 模糊对齐在这里无事可做 —— 顺带也没有它「裁掉读音不近的证据」那个已知损耗。
+
+| 模块 | 文件 |
+|---|---|
+| 转码与读音频 | `src/transcribe_local/audio.py` |
+| 声纹 + VAD + 切块 | `src/transcribe_local/diarize.py` |
+| 四路 ASR | `src/transcribe_local/engines.py` |
+| 分歧册 | `src/transcribe_local/divergence.py` |
+| 融合（OpenAI 协议） | `src/transcribe_local/fuse.py` |
+| 导出 | `src/transcribe_local/export.py` |
+| 模型清单与下载 | `src/transcribe_local/models.py` · `models/manifest.toml` |
+| 融合提示词 | `prompts/merge.zh.md` |
+| 全部参数 | `config.default.yaml` |
+
+## 跑
+
+```bash
+PYTHONPATH=src python3 -m transcribe_local doctor            # 查依赖与模型
+PYTHONPATH=src python3 -m transcribe_local models pull       # 下模型（约 2.8 G）
+PYTHONPATH=src python3 -m transcribe_local run 音频.m4a       # 跑全链
+PYTHONPATH=src python3 -m transcribe_local run 音频.m4a --no-fuse   # 只跑到分歧册
+PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
+```
+
+开发时想复用已有的模型缓存：`TRANSCRIBE_LOCAL_MODELS=~/.cache/sherpa-onnx-models`。
+
+## 改参数之前
+
+`config.default.yaml` 里每个参数都带来源标注：
+
+- `[定档]` 有全长实测支撑 —— **改之前先读注释里的理由**，很多是踩过坑换来的
+- `[未验证]` 没有实测证据，可以放心试
+- `[有更好的]` 已经量出更好的做法但没落地
+- `[缺陷]` 已知有问题
+
+几条最容易被「优化」掉的：
+
+- **归堆人数写死 2。** 多给名额不会去找第三人，会去劈主说话人。
+- **VAD 不是可选项。** 声纹分段单用会漏 215 个真字，取并集后只漏 4 个。
+- **短片段筛选不可信，结论一律跑全长。** 有方案在 10 分钟片段上声纹准确率 99.8%，
+  同一条录音跑全长塌到 63.9%。
+- **AED 引擎跑两次不是同一份稿子。** 下结论前同配置至少跑两遍。
+
+## 改提示词之前
+
+`prompts/merge.zh.md` 是喂给大模型的。**大模型对措辞极其敏感，改动要最小化**，
+而且 P3 的 run-to-run 方差很大 —— 单样本会骗人，**同配置至少跑 3 遍比均值**再下结论。
+
+## 待办
+
+- [ ] 用简化版提示词重跑全长，把 README 里的成绩数字换成实测值
+- [ ] 逐个核实模型许可，补齐 `models/manifest.toml` 的 `license` 与 `sha256`
+- [ ] BSL 的 Licensor 与 Change Date 填成真实值（`LICENSE` 里有 TODO 标记）
+- [ ] 修 `<sil>` 漏进终稿（`divergence.strip_tags` 只清了候选，正文没清）
+- [ ] 统一附和词表与语气词表
+- [ ] Tauri 外壳（`app/`）
+- [ ] 英文 profile
+
+### 远期
+
+- [ ] **注册 Apple Developer 账号**（公司主体要 D-U-N-S 编号，通常要排一到两周）。
+      没有它就没法给 macOS 版签名公证，用户下载后会被 Gatekeeper 拦住、要手工敲 `xattr` 才能打开。
+      在做 Tauri 外壳之前必须已经有账号，否则做出来发不出去。

@@ -1,0 +1,106 @@
+# 模型清单
+#
+# ⛔ 本仓库不重分发任何模型权重。下载器只按下面的地址从各自官方源拉，并校验 SHA256。
+#
+# ⚠️ license 字段目前全部是 "未核实"。发布前必须逐个查清并填上真实条款 ——
+#    这些权重的许可跟本仓库的 BSL 是两回事，用户要遵守的是模型方那一份。
+#    已知反例：Reverb-v2 明确禁止商用（我们测过并否决了），说明这类条款真实存在。
+#
+# sha256 字段同样待填：下载器在校验和为空时会拒绝校验并打印实际值，
+# 便于第一次填表；发布前必须补齐，否则下载没有完整性保证。
+
+schema = 1
+
+# ─── 声纹 ───────────────────────────────────────────────
+[[model]]
+id       = "pyannote-segmentation-3.0"
+role     = "diarize.segmentation"
+size_mb  = 7
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
+archive  = "tar.bz2"
+sha256   = ""
+license  = "未核实"
+note     = "sherpa-onnx 转换版。官方 pyannote 权重需 HF 授权，条款要单独看"
+
+[[model]]
+id       = "campplus-zh"
+role     = "diarize.embedding"
+size_mb  = 28
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+archive  = "none"
+sha256   = ""
+license  = "未核实"
+note     = "阿里 3D-Speaker。全长人工核听 4:2 胜 ERes2Net-200k，且快 2.3 倍、小 8 倍"
+
+[[model]]
+id       = "silero_vad"
+role     = "vad"
+size_mb  = 2
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+archive  = "none"
+sha256   = ""
+license  = "未核实"
+note     = "补漏用。没有它声纹分段会漏 215 个真字，有它只漏 4 个"
+
+# ─── Phase 1 · 四路 ASR ──────────────────────────────────
+[[model]]
+id       = "firered_asr2"
+role     = "asr"
+route    = "AED 自回归"
+size_mb  = 1200
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2"
+archive  = "tar.bz2"
+sha256   = ""
+license  = "未核实"
+note     = "小红书。单台成绩最好（56）、术语活得最多。zh_en 双语，英文 profile 可直接复用"
+
+[[model]]
+id       = "zipformer_ctc"
+role     = "asr"
+route    = "CTC 逐帧"
+size_mb  = 351
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03.tar.bz2"
+archive  = "tar.bz2"
+sha256   = ""
+license  = "未核实"
+note     = "next-gen Kaldi / k2。58。体积小，跑十次同一份稿子"
+
+[[model]]
+id       = "paraformer_2023"
+role     = "asr"
+route    = "非自回归"
+size_mb  = 234
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2"
+archive  = "tar.bz2"
+sha256   = ""
+license  = "未核实"
+note     = "阿里 FunASR。63。最小、最快（全片 54 秒）"
+
+[[model]]
+id       = "qwen3_asr"
+role     = "asr"
+route    = "LLM 式"
+size_mb  = 954
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2"
+archive  = "tar.bz2"
+sha256   = ""
+license  = "未核实"
+note     = "阿里。67。理解力好、不出胡话、自带标点"
+
+# ─── 候选池（不默认下载）────────────────────────────────
+[[model]]
+id       = "seaco_paraformer"
+role     = "asr.optional"
+route    = "非自回归 + 热词"
+size_mb  = 953
+url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+archive  = "tar.bz2"
+sha256   = ""
+license  = "未核实"
+enabled_by_default = false
+note = """
+成绩 63，与 paraformer_2023 坏块重合 88.1%，作为第五路对天花板零增益。
+留它的唯一理由是**它支持热词** —— 这是目前唯一已知能把正确候选「造出来」的手段
+（3 分钟片段实测把「舒成箱」修成了「数采箱」）。代价：额外约 3.1 GB 内存。
+⚠️ url 待核实：需确认这个 release 就是带 SeACo 热词分支的那一版。
+"""

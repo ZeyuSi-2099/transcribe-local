@@ -1,0 +1,37 @@
+# 音频与产物 —— 客户原声永不入库
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.aac
+*.ogg
+/out/
+/runs/
+
+# 模型权重（从官方源下载，不重分发）
+/models/cache/
+*.onnx
+*.safetensors
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Tauri / 前端
+/app/node_modules/
+/app/dist/
+/app/src-tauri/target/
+
+# 本地配置（可能含路径与密钥引用）
+config.yaml
+.env
+
+# macOS
+.DS_Store
