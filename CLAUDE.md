@@ -90,11 +90,16 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 - [ ] 用简化版提示词重跑全长，把 README 里的成绩数字换成实测值
 - [ ] 逐个核实模型许可，补齐 `models/manifest.toml` 的 `license` 与 `sha256`
 - [ ] BSL 的 Licensor 与 Change Date 填成真实值（`LICENSE` 里有 TODO 标记）
-- [ ] Tauri 外壳（`app/`）
+- [ ] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 装一次、敲一行命令起服务，界面在浏览器里开。
+      **三个平台都不需要签名公证**，这是选它而不是先做桌面外壳的主要理由。
 - [ ] 英文 profile
 
 ### 远期
 
+- [ ] **桌面外壳（Tauri 把本机的 `127.0.0.1` 装进一个窗口）** —— 可选项，**不挡发布**。
+      界面代码与浏览器界面是同一份，壳只是换个容器。
 - [ ] **注册 Apple Developer 账号**（公司主体要 D-U-N-S 编号，通常要排一到两周）。
-      没有它就没法给 macOS 版签名公证，用户下载后会被 Gatekeeper 拦住、要手工敲 `xattr` 才能打开。
-      在做 Tauri 外壳之前必须已经有账号，否则做出来发不出去。
+      **只在要做桌面外壳时才需要**：没有它 macOS 版签不了名，用户下载后会被 Gatekeeper 拦住，
+      而 macOS 15 之后右键「打开」那招已经取消，得去系统设置点「仍要打开」或手敲 `xattr`。
+      ⚠️ Windows 同理要买代码签名证书（OV/EV，按年付）才能免掉 SmartScreen ——
+      **签名不是苹果一家的成本**，它是「双击图标」这条路的门票，而浏览器界面这条路不用买票。
