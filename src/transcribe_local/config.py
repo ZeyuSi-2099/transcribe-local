@@ -63,3 +63,30 @@ def explain(key: str) -> list[tuple[str, str, str]]:
         mark = next((m for m in PROVENANCE if f"[{m}" in text), "")
         hits.append((ln.strip(), mark, text))
     return hits
+
+
+STARTER = """# Transcribe Local · 你自己的配置
+#
+# 只写你想改的键，其余自动用 config.default.yaml 的默认值。
+# 每个默认值「从哪来的」：transcribe-local config --explain <键>
+
+engines:
+  enabled:                       # 想少跑几路就删几行（少一路 = 快，但融合的票少一张）
+{engines}
+p3:
+  base_url: {base_url}           # 换后端只改这两行；说 OpenAI 协议的都能接
+  model: {model}
+  # api_key_env: TRANSCRIBE_LOCAL_API_KEY   # 接云端 API 时打开，密钥只从环境变量读
+
+terms:
+  files: []                      # 术语库路径，例如 ["terms/zh_我的行业.md"]
+                                 # 实测：挂对了能突破四路投票的天花板；写错的词形会被模型当权威照抄
+"""
+
+
+def starter(cfg: dict) -> str:
+    """生成一份用户配置模板 —— 只放常改的那几个键，不把 160 行默认值抄一遍。"""
+    return STARTER.format(
+        engines="".join(f"    - {e}\n" for e in cfg["engines"]["enabled"]),
+        base_url=cfg["p3"]["base_url"], model=cfg["p3"]["model"],
+    )

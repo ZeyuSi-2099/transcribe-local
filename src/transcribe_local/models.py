@@ -24,6 +24,18 @@ CHUNK = 32 * 1024 * 1024          # 每次 Range 请求的大小
 MANIFEST = paths.root() / "models" / "manifest.toml"
 
 
+# 降级路径：只装这一路也能出稿（234 M，全片 54 秒）。
+# 让人五分钟内看到第一份结果，再决定要不要下另外 2.5 G —— 没有融合，但有稿子。
+MINIMAL_ENGINES = ["paraformer_2023"]
+
+
+def plan(need: list[str]) -> tuple[list[Entry], int]:
+    """要装哪些、一共多大。返回（缺的条目, 合计 MB）。"""
+    mf = manifest()
+    miss = [mf[m] for m in need if m in mf and not installed(m)]
+    return miss, sum(e.size_mb for e in miss)
+
+
 def cache_dir() -> Path:
     """可用 TRANSCRIBE_LOCAL_MODELS 覆盖。中国网络下换镜像用 TRANSCRIBE_LOCAL_ENDPOINT。"""
     env = os.environ.get("TRANSCRIBE_LOCAL_MODELS")

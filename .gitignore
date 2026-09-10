@@ -25,9 +25,9 @@ build/
 .ruff_cache/
 
 # Tauri / 前端
-/app/node_modules/
-/app/dist/
-/app/src-tauri/target/
+/web/node_modules/
+/web/dist/
+/web/src-tauri/target/
 
 # 本地配置（可能含路径与密钥引用）
 config.yaml

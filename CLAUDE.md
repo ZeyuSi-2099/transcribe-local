@@ -52,6 +52,8 @@
 ## 跑
 
 ```bash
+PYTHONPATH=src python3 -m transcribe_local setup              # 首启向导：查依赖 → 下模型 → 写 config.yaml
+PYTHONPATH=src python3 -m transcribe_local setup --minimal    # 只装一路（271 M），先出一份稿子
 PYTHONPATH=src python3 -m transcribe_local doctor            # 查依赖与模型
 PYTHONPATH=src python3 -m transcribe_local models pull       # 下模型（约 2.8 G）
 PYTHONPATH=src python3 -m transcribe_local run 音频.m4a       # 跑全链
