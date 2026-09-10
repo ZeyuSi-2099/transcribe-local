@@ -109,6 +109,7 @@ def _call(url: str, headers: dict, p3: dict, sysmsg: str, user: str) -> str:
         "stream": False,
         "messages": [{"role": "system", "content": sysmsg}, {"role": "user", "content": user}],
     }
+    payload.update(p3.get("extra") or {})           # 后端专属字段的逃生口，见 config 里的说明
     last: Exception | None = None
     for _ in range(int(p3.get("max_retry", 2)) + 1):
         try:

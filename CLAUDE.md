@@ -77,6 +77,8 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 - **短片段筛选不可信，结论一律跑全长。** 有方案在 10 分钟片段上声纹准确率 99.8%，
   同一条录音跑全长塌到 63.9%。
 - **AED 引擎跑两次不是同一份稿子。** 下结论前同配置至少跑两遍。
+- **附和词表（23 字）和语气词表（19 字）故意不同，别合并。** 前者判「整块是不是纯应答」，
+  后者判「块内这处差异有没有意思」。合表实测会把 16 处真差异折掉。
 
 ## 改提示词之前
 
@@ -88,8 +90,6 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 - [ ] 用简化版提示词重跑全长，把 README 里的成绩数字换成实测值
 - [ ] 逐个核实模型许可，补齐 `models/manifest.toml` 的 `license` 与 `sha256`
 - [ ] BSL 的 Licensor 与 Change Date 填成真实值（`LICENSE` 里有 TODO 标记）
-- [ ] 修 `<sil>` 漏进终稿（`divergence.strip_tags` 只清了候选，正文没清）
-- [ ] 统一附和词表与语气词表
 - [ ] Tauri 外壳（`app/`）
 - [ ] 英文 profile
 
