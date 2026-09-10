@@ -76,28 +76,48 @@ def _runaway(text: str, threshold: int) -> bool:
     return bool(re.search(rf"(.)\1{{{threshold - 1},}}", text))
 
 
+def _qc(text: str, blk: Block, engine_id: str, cb: dict) -> str | None:
+    """这一块这一路有没有跑飞。没问题返回 None。"""
+    if engine_id not in NONDETERMINISTIC:
+        return None                                  # CTC 系逐帧对齐，没这个毛病
+    if cb.get("repeat_detect") and _runaway(text, int(cb.get("repeat_threshold", 10))):
+        return "复读"
+    if cb.get("empty_block_retry") and not text and (blk.end - blk.start) >= 2.0:
+        return "空块"
+    return None
+
+
 def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
-               on_block=None) -> list[Row]:
+               on_block=None) -> tuple[list[Row], list[dict]]:
+    """返回（逐块结果, 重试用尽仍未消除的坏块）。
+
+    ⚠️ 坏块**不改写、不丢弃**，原样留在输出里 —— 改写等于把问题藏起来，
+    而另外三路对同一块有自己的版本，融合那一步本来就能把它救回来。
+    但必须喊出来：静默接受坏块会踩「内容不能丢」这条红线。
+    """
     eng = cfg["engines"]
     cb = eng.get("circuit_breaker", {})
+    retry = int(cb.get("max_retry", 2))
     rec = build(engine_id, int(eng.get("num_threads", 2)))
     rows: list[Row] = []
+    bad: list[dict] = []
+    tag = TAG.get(engine_id, engine_id)
     for i, blk in enumerate(blocks):
         text = _decode(rec, x, blk.start, blk.end)
-        # 熔断：跑飞或吐空就重跑这一块。AED 系不确定，重跑大概率就好了。
-        if engine_id in NONDETERMINISTIC:
-            tries = int(cb.get("max_retry", 2))
-            while tries > 0:
-                bad_repeat = cb.get("repeat_detect") and _runaway(text, int(cb.get("repeat_threshold", 10)))
-                bad_empty = cb.get("empty_block_retry") and not text and (blk.end - blk.start) >= 2.0
-                if not (bad_repeat or bad_empty):
-                    break
-                text = _decode(rec, x, blk.start, blk.end)
-                tries -= 1
+        why = _qc(text, blk, engine_id, cb)
+        for _ in range(retry):                       # AED 系不确定，重跑大概率就好了
+            if not why:
+                break
+            text = _decode(rec, x, blk.start, blk.end)
+            why = _qc(text, blk, engine_id, cb)
+        if why:
+            bad.append(dict(block=i + 1, at=round(blk.start, 1), engine=tag, why=why, text=text[:60]))
+            print(f"⚠️ {tag} 第 {i + 1} 块 [{ts(blk.start)}] {why}，重试 {retry} 次仍未消除。"
+                  f"该块这一路不可信，交给融合时请留意。")
         rows.append(Row(blk.start, blk.end, blk.speaker, text))
         if on_block:
             on_block(i + 1, len(blocks))
-    return rows
+    return rows, bad
 
 
 def ts(x: float) -> str:

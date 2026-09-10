@@ -75,15 +75,22 @@ def _run(a) -> int:
     diarize.save_blocks(blocks, segs, out / "work")
     print(f"    声纹 {len(segs)} 段 → 切块 {len(blocks)} 块  ({time.time() - t0:.0f}s)")
 
-    rows = {}
+    rows, qc = {}, []
     for e in ids:
         t = time.time()
-        rows[e] = engines.transcribe(e, x, blocks, cfg)
+        rows[e], bad = engines.transcribe(e, x, blocks, cfg)
+        qc += bad
         (out / "work" / f"p1_{engines.TAG.get(e, e)}.md").write_text(
             engines.dump(rows[e]), encoding="utf-8")
         chars = sum(len(r.text) for r in rows[e])
         print(f"P1  {engines.TAG.get(e, e):<6} {engines.ROUTE.get(e, ''):<12} "
-              f"{chars:>6} 字  {time.time() - t:.0f}s")
+              f"{chars:>6} 字  {time.time() - t:.0f}s"
+              + (f"  ⚠️ {len(bad)} 块跑飞" if bad else ""))
+    if qc:
+        import json
+        (out / "work" / "qc_warnings.json").write_text(
+            json.dumps(qc, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"⚠️ 共 {len(qc)} 块重试用尽仍跑飞，清单见 work/qc_warnings.json")
 
     p3in, ledger, found = divergence.build(rows, cfg)
     (out / "work" / "p3_input.md").write_text(p3in, encoding="utf-8")

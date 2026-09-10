@@ -4,8 +4,6 @@ License text copyright (c) 2023 MariaDB plc, All Rights Reserved.
 Parameters
 
 Licensor:             Transcribe Labs
-                      <<TODO: replace with the registered legal entity name
-                      before the first public release>>
 
 Licensed Work:        Transcribe Local
                       The Licensed Work is (c) 2026 Transcribe Labs
@@ -20,8 +18,8 @@ Additional Use Grant: You may make production use of the Licensed Work,
                       speech-to-text transcription.
 
 Change Date:          2030-01-01
-                      <<TODO: set to four years after the first public
-                      release, as an explicit calendar date>>
+                      <<TODO: set to the first public release date plus four
+                      years. Must be an explicit calendar date.>>
 
 Change License:       Apache License, Version 2.0
 
