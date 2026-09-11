@@ -102,22 +102,14 @@ note     = "阿里。67。理解力好、不出胡话、自带标点"
 # ─── 候选池（不默认下载）────────────────────────────────
 license_src = "Qwen/Qwen3-ASR-0.6B 模型页标 apache-2.0"
 
-[[model]]
-id       = "seaco_paraformer"
-role     = "asr.optional"
-route    = "非自回归 + 热词"
-size_mb  = 953
-url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
-# ⚠️ 这个 URL 指向的是 paraformer-zh-**small**，不是 SeACo-Paraformer —— 条目写错了。
-#    它不在默认引擎里、也不参与首发，但用之前必须先核对成真正的 SeACo 包，
-#    否则「热词分支」那条路会拿错模型。许可与校验和一并待核。
-archive  = "tar.bz2"
-sha256   = ""
-license  = "未核实"
-enabled_by_default = false
-note = """
-成绩 63，与 paraformer_2023 坏块重合 88.1%，作为第五路对天花板零增益。
-留它的唯一理由是**它支持热词** —— 这是目前唯一已知能把正确候选「造出来」的手段
-（3 分钟片段实测把一个音近的错写锚回了库里的正确词形）。代价：额外约 3.1 GB 内存。
-⚠️ url 待核实：需确认这个 release 就是带 SeACo 热词分支的那一版。
-"""
+# ── 热词那条路，先摘掉 ─────────────────────────────────────────
+# 这里原来有一条 seaco_paraformer（SeACo-Paraformer，带热词/上下文偏置）。
+# 摘掉的理由：**我们核不实它到底是哪个包**。原来填的 URL 指向 paraformer-zh-small
+# （78 MB），而记的体积是 953 MB —— 两边对不上；官方文档里也没有任何一个 release
+# 自称 SeACo。sha256 又是空的，校验这一关等于没有。
+# 一个明知道指错的下载地址留在公开清单里，比没有更糟：拉下来是另一个模型，还不报错。
+#
+# 但那个**发现**是真的，记在这儿别丢：热词是目前唯一已知能把「正确候选造出来」的手段。
+# 术语库只能把音近的残缺候选锚回正确词形 —— 前提是至少有一路已经给出了音近的东西；
+# 热词不一样，它能让引擎在解码时就倾向那个词。代价是额外约 3.1 GB 内存。
+# 要接这条路，先把包核准（确认带 SeACo 热词分支）、补 sha256，再加回来。

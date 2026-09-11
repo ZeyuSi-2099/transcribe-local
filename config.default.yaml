@@ -104,7 +104,8 @@ engines:
 # [定档·已否决] whisper_large_v3(123) · zipformer_transducer(130) · dolphin_ctc(137)
 #               whisper_turbo(161) · firered_ctc(93) · telespeech(踩内容红线，30% 没出来)
 # [定档·同源冗余] seaco_paraformer(63) · paraformer_large(65) —— 与 paraformer_2023 坏块重合 86–91%，
-#                 加进来天花板一点不动。留 seaco 的唯一理由是它支持热词。
+#                 加进来天花板一点不动。seaco 唯一的价值是它支持热词 ——
+#                 但那个包我们没核实成，已从 models/manifest.toml 摘掉，原委记在那里。
 
 # ─────────────────────────────────────────────────────────────
 # ③ 术语库
@@ -116,7 +117,8 @@ terms:
   inject_p1_hotwords: false      # [未验证] SeACo 的热词分支，把词直接送进解码。
                                  #          3 分钟片段实测把一个音近的错写锚回了库里的正确词形 ——
                                  #          这是唯一已知能把正确候选「造出来」的手段。
-                                 #          代价：额外 3.1 GB 内存，且要把 seaco_paraformer 挂成第五路
+                                 #          代价：额外 3.1 GB 内存，且要挂一台支持热词的引擎当第五路
+                                 #          （那个包尚未核实，现在清单里没有，见 models/manifest.toml）
 
 # ─────────────────────────────────────────────────────────────
 # ④ 分歧册
