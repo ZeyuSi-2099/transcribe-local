@@ -41,10 +41,13 @@
 |---|---|
 | 转码与读音频 | `src/transcribe_local/audio.py` |
 | 声纹 + VAD + 切块 | `src/transcribe_local/diarize.py` |
+| 整条链跑一遍 | `src/transcribe_local/pipeline.py`（命令行和界面共用这一个） |
 | 四路 ASR | `src/transcribe_local/engines.py` |
 | 分歧册 | `src/transcribe_local/divergence.py` |
 | 融合（OpenAI 协议） | `src/transcribe_local/fuse.py` |
 | 导出 | `src/transcribe_local/export.py` |
+| 本机服务（标准库） | `src/transcribe_local/server.py` |
+| 界面 | `web/index.html`（单文件，无构建步骤） |
 | 模型清单与下载 | `src/transcribe_local/models.py` · `models/manifest.toml` |
 | 融合提示词 | `prompts/merge.zh.md` |
 | 全部参数 | `config.default.yaml` |
@@ -56,7 +59,8 @@ PYTHONPATH=src python3 -m transcribe_local setup              # 首启向导：�
 PYTHONPATH=src python3 -m transcribe_local setup --minimal    # 只装一路（271 M），先出一份稿子
 PYTHONPATH=src python3 -m transcribe_local doctor            # 查依赖与模型
 PYTHONPATH=src python3 -m transcribe_local models pull       # 下模型（约 2.8 G）
-PYTHONPATH=src python3 -m transcribe_local run 音频.m4a       # 跑全链
+PYTHONPATH=src python3 -m transcribe_local serve             # 起本机服务，界面在浏览器里开
+PYTHONPATH=src python3 -m transcribe_local run 音频.m4a       # 跑全链（命令行）
 PYTHONPATH=src python3 -m transcribe_local run 音频.m4a --no-fuse   # 只跑到分歧册
 PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 ```
@@ -93,8 +97,7 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
       现在那些数是各跑一次的结果（已在 README 里注明不是平均值）。这一步方差很大，单样本会骗人。
 - [ ] 逐个核实模型许可，补齐 `models/manifest.toml` 的 `license` 与 `sha256`
 - [x] BSL 的 Licensor 与 Change Date 已填实（Change Date = 2030-10-01）
-- [ ] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 装一次、敲一行命令起服务，界面在浏览器里开。
-      **三个平台都不需要签名公证**，这是选它而不是先做桌面外壳的主要理由。
+- [x] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 六屏已通，标准库起服务、无新依赖
 - [ ] 英文 profile
 
 ### 远期

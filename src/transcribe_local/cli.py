@@ -45,10 +45,16 @@ def main(argv: list[str] | None = None) -> int:
     p_cfg.add_argument("--explain", metavar="键", help="这个默认值从哪来的")
     p_cfg.add_argument("--init", action="store_true", help="在当前目录写一份 config.yaml 模板")
 
+    p_serve = sub.add_parser("serve", help="起本机服务，界面在浏览器里开")
+    p_serve.add_argument("--port", type=int, default=0, help="0 = 自动挑一个空闲端口")
+    p_serve.add_argument("--no-open", action="store_true", help="不要自动打开浏览器")
+    p_serve.add_argument("-o", "--out", type=Path, default=Path("out"))
+    p_serve.add_argument("-c", "--config", type=Path, default=Path("config.yaml"))
+
     sub.add_parser("doctor", help="检查依赖与模型是否就绪")
 
     a = ap.parse_args(argv)
-    return {"run": _run, "setup": _setup, "models": _models,
+    return {"run": _run, "setup": _setup, "serve": _serve, "models": _models,
             "config": _config, "doctor": _doctor}[a.cmd](a)
 
 
@@ -63,70 +69,46 @@ def _load_cfg(a) -> dict:
 
 
 def _run(a) -> int:
-    from . import audio, diarize, divergence, engines, export, fuse, models
+    from . import models, pipeline
 
     cfg = _load_cfg(a)
-    ids = cfg["engines"]["enabled"]
     missing = [m for m in _needed(cfg) if not models.installed(m)]
     if missing:
-        print(f"缺模型：{', '.join(missing)}\n先跑：transcribe-local models pull", file=sys.stderr)
+        print(f"缺模型：{', '.join(missing)}\n先跑：transcribe-local setup", file=sys.stderr)
         return 2
 
-    out = a.out
-    out.mkdir(parents=True, exist_ok=True)
-    stem = a.audio.stem
-
-    t0 = time.time()
-    wav = audio.to_wav(a.audio, out / f"{stem}.16k.wav",
-                       cfg["audio"]["sample_rate"], cfg["audio"]["channels"])
-    x = audio.load(wav)
-    print(f"P0  音频 {len(x) / audio.SR / 60:.1f} 分钟")
-
-    segs = diarize.diarize(x, cfg)
-    blocks = diarize.chop(x, segs, cfg)
-    diarize.save_blocks(blocks, segs, out / "work")
-    print(f"    声纹 {len(segs)} 段 → 切块 {len(blocks)} 块  ({time.time() - t0:.0f}s)")
-
-    rows, qc = {}, []
-    for e in ids:
-        t = time.time()
-        rows[e], bad = engines.transcribe(e, x, blocks, cfg)
-        qc += bad
-        (out / "work" / f"p1_{engines.TAG.get(e, e)}.md").write_text(
-            engines.dump(rows[e]), encoding="utf-8")
-        chars = sum(len(r.text) for r in rows[e])
-        print(f"P1  {engines.TAG.get(e, e):<6} {engines.ROUTE.get(e, ''):<12} "
-              f"{chars:>6} 字  {time.time() - t:.0f}s"
-              + (f"  ⚠️ {len(bad)} 块跑飞" if bad else ""))
-    if qc:
-        import json
-        (out / "work" / "qc_warnings.json").write_text(
-            json.dumps(qc, ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"⚠️ 共 {len(qc)} 块重试用尽仍跑飞，清单见 work/qc_warnings.json")
-
-    p3in, ledger, found = divergence.build(rows, cfg)
-    (out / "work" / "p3_input.md").write_text(p3in, encoding="utf-8")
-    (out / "work" / "divergence.md").write_text(ledger, encoding="utf-8")
-    n_sub = sum(len(d.substantive) for d in found)
-    n_fill = sum(d.filler_count for d in found)
-    print(f"分歧  实质 {n_sub} 处 + 语气词 {n_fill} 处（已折叠）")
-
-    if a.no_fuse:
-        print(f"\n停在分歧册（--no-fuse）。产物在 {out / 'work'}")
-        return 0
-
-    t = time.time()
-    print(f"P3  {cfg['p3']['model']} @ {cfg['p3']['base_url']}")
-    merged = fuse.fuse(p3in, found, cfg,
-                       on_batch=lambda n, N: print(f"    批次 {n}/{N}", end="\r", flush=True))
-    (out / f"{stem}.merged.md").write_text(merged, encoding="utf-8")
-    uncertain = merged.count("[❓]")
-    print(f"    {len(merged.splitlines())} 行，存疑 {uncertain} 处  ({time.time() - t:.0f}s)")
-
-    written = export.write(merged, out / stem, cfg)
-    print("\n导出：" + " · ".join(str(p) for p in written))
-    print(f"总耗时 {time.time() - t0:.0f}s")
+    r = pipeline.run(a.audio, a.out, cfg, no_fuse=a.no_fuse, emit=_printer())
+    if r.qc:
+        print(f"⚠️ 共 {len(r.qc)} 块重试用尽仍跑飞，清单见 {r.out / 'work' / 'qc_warnings.json'}")
+    if not a.no_fuse:
+        print("\n导出：" + " · ".join(str(p) for p in r.exports))
+    else:
+        print(f"\n停在分歧册（--no-fuse）。产物在 {r.out / 'work'}")
+    print(f"总耗时 {r.seconds:.0f}s")
     return 0
+
+
+def _printer():
+    """把流水线事件打成人话。界面那边用同样的事件画进度条。"""
+    def say(kind, **kw):
+        if kind == "audio":
+            print(f"P0  音频 {kw['minutes']} 分钟")
+        elif kind == "chop":
+            print(f"    声纹 {kw['segments']} 段 → 切块 {kw['blocks']} 块  ({kw['seconds']}s)")
+        elif kind == "engine_block":
+            print(f"P1  {kw['engine']:<6} {kw['done']}/{kw['total']}", end="\r", flush=True)
+        elif kind == "engine_done":
+            print(f"P1  {kw['engine']:<6} {kw['chars']:>6} 字  {kw['seconds']}s"
+                  + (f"  ⚠️ {kw['bad']} 块跑飞" if kw["bad"] else "") + " " * 12)
+        elif kind == "divergence":
+            print(f"分歧  实质 {kw['substantive']} 处 + 语气词 {kw['fillers']} 处（已折叠）")
+        elif kind == "stage" and kw["name"] == "P3":
+            print(f"P3  {kw['text']}")
+        elif kind == "batch":
+            print(f"    批次 {kw['done']}/{kw['total']}", end="\r", flush=True)
+        elif kind == "fused":
+            print(f"    {kw['lines']} 行，存疑 {kw['uncertain']} 处  ({kw['seconds']}s)" + " " * 12)
+    return say
 
 
 def _setup(a) -> int:
@@ -270,6 +252,11 @@ def _config(a) -> int:
             if t.strip():
                 print("  " + t)
     return 0
+
+
+def _serve(a) -> int:
+    from . import server
+    return server.serve(_load_cfg(a), a.out, port=a.port, open_browser=not a.no_open)
 
 
 def _doctor(a) -> int:

@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Transcribe Local</title>
+<style>
+/* 设计 token 直接继承 Transcribe SaaS 那套，一个色值不改 —— 两边看起来就是一家出的。
+   字体全走系统栈：本地软件不联网也得能打开，不能依赖字体 CDN。 */
+:root{
+  --bg:#F2EDE3; --paper:#FBF7EE; --panel:#EDE6D7; --line:#E2DACA; --line2:#ECE4D4;
+  --raised:#FFFCF5; --ink:#1F1A14; --inkMuted:#5A4E3F; --inkFaint:#75654F; --inkGhost:#B5A88F;
+  --accent:#C8553D; --accentDeep:#A8442F; --accentSoft:#F2D9D1; --accentTint:#FAEDE7;
+  --ok:#5C7A4E; --okTint:#EDF1E7; --warn:#A37A2A; --warnTint:#F7EFDD;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  --serif:"Source Serif 4",Georgia,"Songti SC",serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,"JetBrains Mono","Cascadia Mono",monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#17140F; --paper:#1F1B15; --panel:#282218; --line:#38301F; --line2:#2E2719;
+  --raised:#232019; --ink:#F3EEE4; --inkMuted:#C4B79F; --inkFaint:#A3947A; --inkGhost:#7A6D57;
+  --accent:#E38468; --accentDeep:#F0A188; --accentSoft:#4A2B21; --accentTint:#2B1D17;
+  --ok:#9DBA87; --okTint:#232A1C; --warn:#D6AC5E; --warnTint:#2E2617;
+}}
+:root[data-theme="dark"]{
+  --bg:#17140F; --paper:#1F1B15; --panel:#282218; --line:#38301F; --line2:#2E2719;
+  --raised:#232019; --ink:#F3EEE4; --inkMuted:#C4B79F; --inkFaint:#A3947A; --inkGhost:#7A6D57;
+  --accent:#E38468; --accentDeep:#F0A188; --accentSoft:#4A2B21; --accentTint:#2B1D17;
+  --ok:#9DBA87; --okTint:#232A1C; --warn:#D6AC5E; --warnTint:#2E2617;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.7;
+     -webkit-font-smoothing:antialiased;display:flex}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accentDeep);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ── 侧栏 ── */
+nav{width:196px;flex:0 0 196px;background:var(--paper);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;padding:20px 0 14px}
+.brand{font-family:var(--serif);font-size:19px;font-weight:600;letter-spacing:-.3px;padding:0 18px 4px}
+.brand i{color:var(--accent);font-style:normal}
+.lanes{display:flex;gap:3px;height:3px;margin:10px 18px 22px}
+.lanes span{flex:1;border-radius:2px;background:var(--accent)}
+.lanes span:nth-child(2){opacity:.62}.lanes span:nth-child(3){opacity:.42}.lanes span:nth-child(4){opacity:.26}
+nav button.tab{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;
+  border-left:2px solid transparent;padding:8px 18px;cursor:pointer;color:var(--inkFaint);font-size:14px}
+nav button.tab:hover{background:var(--panel);color:var(--ink)}
+nav button.tab[aria-current="true"]{color:var(--accent);border-left-color:var(--accent);background:var(--accentTint)}
+nav button.tab .n{font-family:var(--mono);font-size:10.5px;opacity:.7;width:14px}
+nav .spacer{flex:1}
+.promo{margin:0 14px;padding:12px 13px;border:1px solid var(--line);border-radius:var(--r);
+  background:var(--raised);font-size:12px;color:var(--inkFaint);line-height:1.6}
+.promo b{display:block;font-family:var(--serif);font-size:14px;color:var(--ink);margin-bottom:3px}
+.promo a{color:var(--accent)}
+.themebtn{background:none;border:0;color:var(--inkGhost);font-size:11.5px;cursor:pointer;padding:10px 18px 0;text-align:left}
+
+/* ── 主区 ── */
+main{flex:1;min-width:0;overflow-y:auto;padding:34px 40px 80px}
+.wrap{max-width:880px}
+h1{font-size:24px;font-weight:600;letter-spacing:-.3px;margin:0 0 6px}
+.sub{color:var(--inkFaint);font-size:13.5px;margin:0 0 26px;max-width:62ch}
+h2{font-size:15px;font-weight:600;margin:30px 0 10px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.hide{display:none!important}
+
+.card{background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;margin:0 0 14px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+label.f{display:block;font-size:12px;color:var(--inkFaint);margin:0 0 5px;letter-spacing:.02em}
+input[type=text],select,textarea{width:100%;background:var(--paper);border:1px solid var(--line);
+  border-radius:6px;padding:8px 11px;font-size:13.5px}
+textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340px;resize:vertical}
+.btn{background:var(--accent);color:#FBF7EE;border:0;border-radius:6px;padding:9px 20px;cursor:pointer;font-weight:500}
+.btn:hover{background:var(--accentDeep)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--ink)}
+.btn.ghost:hover{background:var(--panel)}
+
+/* 拖放 */
+.drop{border:1.5px dashed var(--line);border-radius:var(--r);background:var(--paper);
+  padding:38px 24px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accentTint)}
+.drop .big{font-size:16px;font-weight:500;margin-bottom:5px}
+.drop .hint{color:var(--inkFaint);font-size:12.5px}
+
+/* chip */
+.chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10.5px;padding:2px 8px;
+  border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--inkFaint);white-space:nowrap}
+.chip::before{content:"";width:5px;height:5px;border-radius:99px;background:var(--inkGhost)}
+.chip.ok{background:var(--okTint);border-color:transparent;color:var(--ok)}.chip.ok::before{background:var(--ok)}
+.chip.warn{background:var(--warnTint);border-color:transparent;color:var(--warn)}.chip.warn::before{background:var(--warn)}
+.chip.acc{background:var(--accentTint);border-color:transparent;color:var(--accent)}.chip.acc::before{background:var(--accent)}
+
+/* 运行中 —— 这一屏是招牌 */
+.lane{display:grid;grid-template-columns:104px 1fr 88px;gap:12px;align-items:center;padding:9px 0;
+  border-bottom:1px solid var(--line2)}
+.lane:last-child{border-bottom:0}
+.lane .nm{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12.5px}
+.lane .bar{width:3px;height:15px;border-radius:2px;background:var(--accent);flex:0 0 auto}
+.lane:nth-child(2) .bar{opacity:.72}.lane:nth-child(3) .bar{opacity:.5}.lane:nth-child(4) .bar{opacity:.32}
+.track{height:6px;border-radius:3px;background:var(--panel);overflow:hidden}
+.track i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+.lane .st{font-family:var(--mono);font-size:11.5px;color:var(--inkFaint);text-align:right}
+.lane.done .st{color:var(--ok)}
+.stage{display:flex;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line2);font-size:13.5px}
+.stage .k{font-family:var(--mono);font-size:11px;color:var(--inkFaint);width:64px;flex:0 0 64px}
+.stage .v{color:var(--inkMuted)}
+
+/* 结果 */
+.script{border:1px solid var(--line);border-radius:var(--r);background:var(--raised);overflow:hidden}
+.line{display:grid;grid-template-columns:78px 26px 1fr;gap:10px;padding:7px 16px;border-bottom:1px solid var(--line2);
+  font-size:14px;line-height:1.75}
+.line:last-child{border-bottom:0}
+.line.q{background:var(--accentTint);cursor:pointer}
+.line .t{font-family:var(--mono);font-size:11.5px;color:var(--inkGhost);padding-top:3px}
+.line .sp{font-family:var(--mono);font-size:11.5px;color:var(--accent);padding-top:3px}
+.line mark{background:var(--accentSoft);color:inherit;border-radius:3px;padding:0 2px}
+.cands{grid-column:1/-1;margin:6px 0 2px;padding:9px 12px;background:var(--paper);border-left:2px solid var(--accent);
+  border-radius:0 6px 6px 0;font-family:var(--mono);font-size:12px;color:var(--inkMuted);line-height:1.9;white-space:pre-wrap}
+.stats{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin:0 0 16px}
+.stat{background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:13px 15px}
+.stat b{display:block;font-family:var(--mono);font-size:23px;font-weight:500;letter-spacing:-.5px;line-height:1.2}
+.stat span{font-size:12px;color:var(--inkFaint)}
+
+/* 设置 */
+.knob{border-bottom:1px solid var(--line2);padding:11px 0}
+.knob:last-child{border-bottom:0}
+.knob .hd{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.knob .k{font-family:var(--mono);font-size:13px}
+.knob .v{font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:500}
+.knob .why{margin:6px 0 0;font-size:12.5px;color:var(--inkMuted);white-space:pre-wrap;line-height:1.7;
+  display:none;padding-left:12px;border-left:2px solid var(--line)}
+.knob.open .why{display:block}
+.knob .more{background:none;border:0;color:var(--inkGhost);cursor:pointer;font-size:11.5px;padding:0}
+
+.note{border:1px solid var(--line);border-left:3px solid var(--warn);background:var(--warnTint);
+  border-radius:6px;padding:11px 14px;margin:14px 0;font-size:13px;color:var(--inkMuted)}
+.note.acc{border-left-color:var(--accent);background:var(--accentTint)}
+.note b{color:var(--ink)}
+.empty{color:var(--inkGhost);font-size:13.5px;padding:28px 0}
+@media(max-width:760px){
+  body{flex-direction:column}
+  nav{width:auto;flex:0 0 auto;flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);
+      padding:10px 8px;align-items:center;gap:4px}
+  .brand,.lanes,.promo,.spacer,.themebtn{display:none}
+  nav button.tab{width:auto;border-left:0;border-bottom:2px solid transparent;padding:6px 12px;white-space:nowrap}
+  nav button.tab[aria-current="true"]{border-bottom-color:var(--accent)}
+  main{padding:22px 18px 60px}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">Transcribe<i>.</i></div>
+  <div class="lanes"><span></span><span></span><span></span><span></span></div>
+  <button class="tab" data-view="new"><span class="n">01</span>新建</button>
+  <button class="tab" data-view="run"><span class="n">02</span>运行中</button>
+  <button class="tab" data-view="result"><span class="n">03</span>结果</button>
+  <button class="tab" data-view="settings"><span class="n">04</span>设置</button>
+  <button class="tab" data-view="terms"><span class="n">05</span>术语库</button>
+  <button class="tab" data-view="history"><span class="n">06</span>历史</button>
+  <div class="spacer"></div>
+  <button class="themebtn" id="theme">切换深浅色</button>
+  <div class="promo">
+    <b>Transcribe</b>要 27 门语言、更高精度或团队协作？
+    <a href="https://transcribe.solutions" target="_blank" rel="noopener">用在线版 →</a>
+  </div>
+</nav>
+
+<main>
+<!-- ═══ 01 新建 ═══ -->
+<section class="wrap" id="v-new">
+  <h1>新建转录</h1>
+  <p class="sub">音频和模型一步都不出这台机器。浏览器只是界面，识别在本机的 Python 进程里跑。</p>
+
+  <div class="drop" id="drop">
+    <div class="big">把录音拖到这里</div>
+    <div class="hint">或点击选择 · m4a / mp3 / wav / flac / aac / ogg</div>
+    <input type="file" id="file" class="hide" accept="audio/*,.m4a,.mp3,.wav,.flac,.aac,.ogg">
+  </div>
+  <div class="row" style="margin:10px 0 0">
+    <div style="flex:1;min-width:260px">
+      <label class="f">或者直接给本机路径（大文件不用上传，快）</label>
+      <input type="text" id="path" placeholder="~/Downloads/访谈.m4a">
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <div class="row">
+      <div style="flex:1;min-width:210px">
+        <label class="f">预设</label>
+        <select id="preset">
+          <option value="full">标准 —— 四路全开 + 融合</option>
+          <option value="fast">快速 —— 只跑最快的一路，不融合</option>
+          <option value="nofuse">四路但不融合 —— 只出分歧册</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:210px">
+        <label class="f">术语库（逗号分隔，可空）</label>
+        <input type="text" id="terms" placeholder="terms/zh_我的行业.md">
+      </div>
+    </div>
+    <p class="sub" style="margin:12px 0 0" id="engineline"></p>
+  </div>
+
+  <div id="warn-box"></div>
+  <div class="row" style="margin-top:16px">
+    <button class="btn" id="go" disabled>开始</button>
+    <span class="mono" style="font-size:12px;color:var(--inkFaint)" id="picked"></span>
+  </div>
+</section>
+
+<!-- ═══ 02 运行中 ═══ -->
+<section class="wrap hide" id="v-run">
+  <h1>运行中</h1>
+  <p class="sub" id="runsub"></p>
+  <div class="card">
+    <div id="stages"></div>
+    <div id="lanes" style="margin-top:6px"></div>
+  </div>
+  <div id="runtail"></div>
+</section>
+
+<!-- ═══ 03 结果 ═══ -->
+<section class="wrap hide" id="v-result">
+  <h1>结果</h1>
+  <p class="sub" id="ressub"></p>
+  <div class="stats" id="resstats"></div>
+  <div id="resqc"></div>
+  <div class="note acc" id="resquality"></div>
+  <h2>终稿 —— 点带 <span class="mono">[❓]</span> 的那行，看四路各自写了什么</h2>
+  <div class="script" id="script"></div>
+  <h2>导出</h2>
+  <div class="row" id="exports"></div>
+</section>
+
+<!-- ═══ 04 设置 ═══ -->
+<section class="wrap hide" id="v-settings">
+  <h1>参数</h1>
+  <p class="sub">每个默认值都标了「从哪来的」。<b>别家的转录工具也给参数，但没人告诉你这个数是怎么定的。</b>
+     改值请编辑项目目录下的 <span class="mono">config.yaml</span>（<span class="mono">config --init</span> 生成），改完重启服务。</p>
+  <div class="row" id="tally" style="margin-bottom:18px"></div>
+  <div class="card" id="knobs"></div>
+</section>
+
+<!-- ═══ 05 术语库 ═══ -->
+<section class="wrap hide" id="v-terms">
+  <h1>术语库</h1>
+  <p class="sub">一行一条 <span class="mono">- 术语 ｜ 含义</span>，全角竖线。<b>只记正确写法，不要枚举错写形</b> ——
+     库会注入融合提示词、宜短，音近的候选模型自己会锚。</p>
+  <div class="note"><b>实测：挂对了能突破四路投票的天花板</b>（四路全听错的地方，术语库是第四条信息源）。
+     但它<b>只在库里真有那个词时才起作用</b>，而且<b>写错的词形会被模型当权威照着改 —— 写错比不写更坏</b>。新词先查清楚再写。</div>
+  <label class="f">文件路径</label>
+  <input type="text" id="termpath" value="terms/zh_我的行业.md">
+  <label class="f" style="margin-top:12px">内容</label>
+  <textarea id="termtext" spellcheck="false"># 我的术语库
+
+## 主题分段
+
+- 术语 ｜ 一句话解释它是什么
+</textarea>
+  <div class="row" style="margin-top:12px">
+    <button class="btn" id="saveterms">保存</button>
+    <span class="mono" style="font-size:12px;color:var(--inkFaint)" id="termmsg"></span>
+  </div>
+</section>
+
+<!-- ═══ 06 历史 ═══ -->
+<section class="wrap hide" id="v-history">
+  <h1>历史</h1>
+  <p class="sub">本机跑过的任务。产物留在 <span class="mono">out/</span> 下，按任务号分目录。</p>
+  <div id="hist"></div>
+</section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let STATE = null, JOB = null, RESULT = null, SRC = null;
+
+/* ── 视图切换 ── */
+function show(v){
+  $$('section').forEach(s => s.classList.toggle('hide', s.id !== 'v-' + v));
+  $$('nav .tab').forEach(b => b.setAttribute('aria-current', String(b.dataset.view === v)));
+  if (v === 'settings') loadKnobs();
+  if (v === 'history') loadHistory();
+}
+$$('nav .tab').forEach(b => b.onclick = () => show(b.dataset.view));
+
+$('#theme').onclick = () => {
+  const now = document.documentElement.getAttribute('data-theme');
+  const dark = now ? now === 'dark' : matchMedia('(prefers-color-scheme:dark)').matches;
+  document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+};
+
+/* ── 启动：拉状态 ── */
+async function boot(){
+  STATE = await (await fetch('/api/state')).json();
+  $('#engineline').textContent = '这次会跑：' +
+    STATE.engines.map(e => `${e.tag}（${e.route}）`).join(' · ');
+  const w = [];
+  const miss = STATE.models.filter(m => !m.installed);
+  if (miss.length) w.push(`还缺 ${miss.length} 个模型（${miss.reduce((a,m)=>a+m.size_mb,0)} M）—— 在终端跑 <span class="mono">transcribe-local setup</span>`);
+  if (!STATE.ffmpeg) w.push('没装 ffmpeg —— 只能喂 16 kHz 单声道 .wav');
+  if (!STATE.p3.reachable) w.push(`融合后端连不上（<span class="mono">${esc(STATE.p3.base_url)}</span>）—— 本机模型记得先起服务，或者用「不融合」预设先出分歧册`);
+  $('#warn-box').innerHTML = w.length ? `<div class="note">${w.map(x=>'· '+x).join('<br>')}</div>` : '';
+}
+
+/* ── 选文件 ── */
+const drop = $('#drop');
+drop.onclick = () => $('#file').click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); };
+$('#file').onchange = e => pick(e.target.files[0]);
+$('#path').oninput = e => {
+  SRC = e.target.value.trim() ? {path: e.target.value.trim()} : null;
+  $('#picked').textContent = SRC ? '用本机路径' : '';
+  $('#go').disabled = !SRC;
+};
+
+function pick(f){
+  if (!f) return;
+  SRC = {file: f};
+  $('#picked').textContent = `${f.name} · ${(f.size/1e6).toFixed(1)} M`;
+  $('#go').disabled = false;
+}
+
+/* ── 开跑 ── */
+$('#go').onclick = async () => {
+  if (!SRC) return;
+  $('#go').disabled = true;
+  let path = SRC.path;
+  if (SRC.file){
+    $('#picked').textContent = '上传中…';
+    const r = await fetch('/api/upload?name=' + encodeURIComponent(SRC.file.name),
+                          {method:'POST', body: SRC.file});
+    path = (await r.json()).path;
+  }
+  const preset = $('#preset').value;
+  const body = {
+    path,
+    no_fuse: preset !== 'full',
+    terms: $('#terms').value.split(',').map(s=>s.trim()).filter(Boolean),
+  };
+  if (preset === 'fast') body.engines = ['paraformer_2023'];
+  const r = await fetch('/api/run', {method:'POST', body: JSON.stringify(body)});
+  const j = await r.json();
+  if (j.error){ alertBox(j.error); $('#go').disabled = false; return; }
+  JOB = j.job;
+  startRun(preset);
+};
+
+function alertBox(msg){
+  $('#warn-box').innerHTML = `<div class="note"><b>跑不起来：</b>${esc(msg)}</div>`;
+}
+
+/* ── 运行中：四轨并行 ── */
+function startRun(preset){
+  const engines = preset === 'fast' ? [{tag:'PARA', route:'非自回归'}] : STATE.engines;
+  $('#runsub').textContent = '任务 ' + JOB;
+  $('#stages').innerHTML = '';
+  $('#runtail').innerHTML = '';
+  $('#lanes').innerHTML = engines.map(e => `
+    <div class="lane" data-tag="${e.tag}">
+      <div class="nm"><i class="bar"></i>${e.tag}</div>
+      <div class="track"><i></i></div>
+      <div class="st">等切块</div>
+    </div>`).join('');
+  show('run');
+
+  const es = new EventSource('/api/events?job=' + JOB);
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    if (d.kind === 'closed'){ es.close(); return; }
+    onEvent(d);
+  };
+}
+
+function stage(k, v){
+  const el = document.createElement('div');
+  el.className = 'stage';
+  el.innerHTML = `<span class="k">${k}</span><span class="v">${v}</span>`;
+  $('#stages').append(el);
+}
+
+function onEvent(d){
+  const lane = t => $(`#lanes .lane[data-tag="${t}"]`);
+  switch (d.kind){
+    case 'audio':     stage('P0', `音频 ${d.minutes} 分钟`); break;
+    case 'chop':      stage('', `声纹 ${d.segments} 段 → 切块 <b>${d.blocks}</b> 块（${d.seconds}s）`); break;
+    case 'engine_block': {
+      const L = lane(d.engine); if (!L) break;
+      L.querySelector('.track i').style.width = (d.done / d.total * 100) + '%';
+      L.querySelector('.st').textContent = `${d.done}/${d.total}`;
+      break;
+    }
+    case 'engine_done': {
+      const L = lane(d.engine); if (!L) break;
+      L.classList.add('done');
+      L.querySelector('.track i').style.width = '100%';
+      L.querySelector('.st').textContent = `${d.seconds}s` + (d.bad ? ` ⚠️${d.bad}` : '');
+      break;
+    }
+    case 'qc':
+      $('#runtail').innerHTML += `<div class="note"><b>${d.count} 块重试用尽仍跑飞。</b>
+        坏块原样留着没改写也没丢 —— 改写等于把问题藏起来，而另外几路对同一块有自己的版本，融合那步本来就能救回来。
+        清单在 <span class="mono">out/${JOB}/work/qc_warnings.json</span>。</div>`;
+      break;
+    case 'divergence': stage('分歧', `实质 <b>${d.substantive}</b> 处 + 语气词 ${d.fillers} 处（已折叠）`); break;
+    case 'stage':      if (d.name === 'P3') stage('P3', esc(d.text)); break;
+    case 'batch':      { const s = $('#stages').lastElementChild;
+                         if (s) s.querySelector('.v').innerHTML = `融合中 · 批次 ${d.done}/${d.total}`; break; }
+    case 'fused':      stage('', `${d.lines} 行，存疑 <b>${d.uncertain}</b> 处（${d.seconds}s）`); break;
+    case 'error':
+      $('#runtail').innerHTML += `<div class="note"><b>失败了：</b><span class="mono">${esc(d.message)}</span></div>`;
+      break;
+    case 'done':
+      stage('完成', `总耗时 ${d.seconds}s`);
+      loadResult();
+      break;
+  }
+}
+
+/* ── 结果 ── */
+async function loadResult(){
+  const j = await (await fetch('/api/job/' + JOB)).json();
+  if (!j.result) return;
+  RESULT = j.result;
+  const r = RESULT;
+  $('#ressub').textContent = `${r.stem} · ${r.minutes} 分钟 · ${r.blocks} 块 · 耗时 ${r.seconds}s`;
+  $('#resstats').innerHTML = [
+    [r.blocks, '切块'],
+    [r.substantive, '实质分歧'],
+    [r.uncertain, '存疑 [❓]'],
+    [Object.keys(r.engines).length, '路引擎'],
+  ].map(([n,l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+
+  $('#resqc').innerHTML = r.qc.length
+    ? `<div class="note"><b>${r.qc.length} 块有引擎跑飞</b>（原样保留、没丢内容）：` +
+      r.qc.slice(0,6).map(q => `${q.engine} 第 ${q.block} 块 ${q.why}`).join('、') + '</div>' : '';
+
+  $('#resquality').innerHTML = `<b>这份稿子离商用还有多远，我们直说。</b>
+    同一条 38 分钟访谈、461 个实质语义块：最好的单台本地引擎 56 处出问题 → 本地四路 + 融合 20 处 →
+    再挂上术语库 18 处 → 我们的云端生产线不到 10 处，而且那些残留都留了痕、都能由人工复核改掉。
+    <a href="https://transcribe.solutions" target="_blank" rel="noopener">在线版 →</a>`;
+
+  renderScript(r.merged, r.ledger);
+  $('#exports').innerHTML = r.exports.length
+    ? r.exports.map(n => `<span class="chip ok">${esc(n)}</span>`).join('') +
+      `<span class="mono" style="font-size:12px;color:var(--inkFaint)">在 out/${JOB}/ 下</span>`
+    : `<span class="mono" style="font-size:12px;color:var(--inkFaint)">没有融合，产物在 out/${JOB}/work/</span>`;
+  show('result');
+}
+
+/* 分歧册按块号索引，点 [❓] 那行就能看到各路候选 */
+function parseLedger(text){
+  const map = {};
+  let cur = null;
+  for (const ln of (text || '').split('\n')){
+    const m = ln.match(/^#(\d+)\s/);
+    if (m){ cur = +m[1]; map[cur] = []; continue; }
+    if (cur && ln.trim().startsWith('·')) map[cur].push(ln.trim());
+  }
+  return map;
+}
+
+function renderScript(merged, ledger){
+  const cands = parseLedger(ledger);
+  const lines = (merged || '').split('\n').filter(Boolean);
+  $('#script').innerHTML = lines.map((ln, i) => {
+    const m = ln.match(/^\[([^\]]+)\]\s*([MR])?\s*[:：]?\s*(.*)$/);
+    const [t, sp, body] = m ? [m[1], m[2] || '', m[3]] : ['', '', ln];
+    const q = body.includes('[❓]');
+    const html = esc(body).replace(/\[❓\]/g, '<mark>[❓]</mark>');
+    const c = cands[i + 1];
+    return `<div class="line ${q ? 'q' : ''}" data-i="${i}">
+      <div class="t">${esc(t.split('-')[0].trim())}</div><div class="sp">${sp}</div><div>${html}</div>
+      ${q && c && c.length ? `<div class="cands hide">${esc(c.join('\n'))}</div>` : ''}
+    </div>`;
+  }).join('') || '<div class="empty" style="padding:20px">没有终稿 —— 这次没跑融合。</div>';
+
+  $('#script').onclick = e => {
+    const line = e.target.closest('.line');
+    const c = line && line.querySelector('.cands');
+    if (c) c.classList.toggle('hide');
+  };
+}
+
+/* ── 设置：参数 + 来源标注 ── */
+let KNOBS = null;
+async function loadKnobs(){
+  if (KNOBS) return;
+  KNOBS = await (await fetch('/api/config')).json();
+  const marks = Object.keys(KNOBS.provenance);
+  const cls = {'定档':'ok', '未验证':'', '有更好的':'acc', '缺陷':'warn'};
+  const lines = KNOBS.text.split('\n');
+  const items = [], tally = {};
+  for (let i = 0; i < lines.length; i++){
+    const m = lines[i].match(/^(\s*)([a-z_0-9]+):\s*(.*?)(?:\s*#\s*(.*))?$/);
+    if (!m || !m[3]) continue;                 // 只列有值的键，分组标题跳过
+    const [, ind, key, val] = m;
+    let why = m[4] ? m[4] + '\n' : '';
+    for (let j = i + 1; j < lines.length; j++){
+      const t = lines[j];
+      if (t.trim().startsWith('#') && t.startsWith(' '.repeat(20))) why += t.replace(/^\s*#\s?/, '') + '\n';
+      else if (t.trim().startsWith('#') && !t.replace(/[#\s]/g,'')) continue;
+      else break;
+    }
+    const mark = marks.find(x => why.includes('[' + x + ']')) || '';
+    why = why.replace(/\[(定档|未验证|有更好的|缺陷)\]\s*/g, '').trim();
+    tally[mark || '未标'] = (tally[mark || '未标'] || 0) + 1;
+    items.push({key, val: val.trim(), mark, why, indent: ind.length});
+  }
+  $('#tally').innerHTML = marks.filter(k => tally[k]).map(k =>
+    `<span class="chip ${cls[k]}">${k} · ${tally[k]}</span>`).join('') +
+    `<span class="chip">未标 · ${tally['未标'] || 0}</span>`;
+  $('#knobs').innerHTML = items.map((it, n) => `
+    <div class="knob" data-n="${n}">
+      <div class="hd">
+        <span class="k">${esc(it.key)}</span><span class="v">${esc(it.val)}</span>
+        ${it.mark ? `<span class="chip ${cls[it.mark]}">${it.mark}</span>` : ''}
+        ${it.why ? '<button class="more">为什么是这个值 ▾</button>' : ''}
+      </div>
+      ${it.why ? `<div class="why">${esc(it.why)}</div>` : ''}
+    </div>`).join('');
+  $('#knobs').onclick = e => {
+    if (!e.target.classList.contains('more')) return;
+    const k = e.target.closest('.knob');
+    k.classList.toggle('open');
+    e.target.textContent = k.classList.contains('open') ? '收起 ▴' : '为什么是这个值 ▾';
+  };
+}
+
+/* ── 术语库 ── */
+$('#saveterms').onclick = async () => {
+  const r = await fetch('/api/terms', {method:'POST', body: JSON.stringify({
+    path: $('#termpath').value.trim(), text: $('#termtext').value})});
+  const j = await r.json();
+  $('#termmsg').textContent = j.error ? '没存上：' + j.error : '存好了 · ' + j.path;
+};
+
+/* ── 历史 ── */
+async function loadHistory(){
+  const s = await (await fetch('/api/state')).json();
+  $('#hist').innerHTML = s.jobs.length ? s.jobs.slice().reverse().map(j => `
+    <div class="card"><div class="row">
+      <span class="mono">${j.id}</span>
+      <span style="flex:1">${esc(j.stem)}</span>
+      <span class="chip ${j.state === 'done' ? 'ok' : j.state === 'failed' ? 'warn' : 'acc'}">${
+        {running:'跑着', done:'完成', failed:'失败'}[j.state] || j.state}</span>
+      ${j.state === 'done' ? `<button class="btn ghost" onclick="JOB='${j.id}';loadResult()">看结果</button>` : ''}
+    </div></div>`).join('') : '<div class="empty">还没跑过。</div>';
+}
+
+show('new');
+boot();
+</script>
+</body>
+</html>
