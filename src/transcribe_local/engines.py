@@ -76,6 +76,18 @@ def build(engine_id: str, num_threads: int = 2):
     raise ValueError(f"未知引擎：{engine_id}")
 
 
+# 重试时把块的窗口往外挪一点点。
+# ⚠️ **原样重跑是没用的** —— sherpa-onnx 的离线解码是贪心的，同一段音频喂进去逐字相同。
+#   2026-09-11 实测：FireRed 在同一块上连跑三遍，输出长度都是 122、一个字不差。
+#   这之前代码里写着「AED 系不确定，重跑大概率就好了」，那个假设是错的，白烧两遍 CPU。
+# 真正能翻结果的是**块边界**：我们量过 0.5 ms 的抖动就能翻掉十几块的结果。
+# 一律**往外扩、不往里切**：往里切会丢掉音频，踩「内容不能丢」这条红线；
+#   往外扩最多把邻块的半个字重收一次 —— 宁可重一个字，不可丢一个字。
+# 扩多少不是越大越好（同一块上 +120 ms 反而又跑飞了），所以这是一张实测出来的梯子，
+#   不是一个能往上调的系数。改它请重新实测。
+NUDGE = [(0.0, 0.0), (-0.05, 0.05), (-0.05, 0.0), (-0.15, 0.15)]
+
+
 def _decode(rec, x: np.ndarray, a: float, b: float) -> str:
     st = rec.create_stream()
     st.accept_waveform(SR, x[int(a * SR):int(b * SR)])
@@ -114,14 +126,15 @@ def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
     rows: list[Row] = []
     bad: list[dict] = []
     tag = TAG.get(engine_id, engine_id)
+    span = len(x) / SR
     for i, blk in enumerate(blocks):
-        text = _decode(rec, x, blk.start, blk.end)
-        why = _qc(text, blk, engine_id, cb)
-        for _ in range(retry):                       # AED 系不确定，重跑大概率就好了
+        text, why = "", None
+        for k in range(retry + 1):                   # 第 0 次是原样，之后每次换一档窗口
+            ds, de = NUDGE[min(k, len(NUDGE) - 1)]
+            text = _decode(rec, x, max(0.0, blk.start + ds), min(span, blk.end + de))
+            why = _qc(text, blk, engine_id, cb)
             if not why:
                 break
-            text = _decode(rec, x, blk.start, blk.end)
-            why = _qc(text, blk, engine_id, cb)
         if why:
             bad.append(dict(block=i + 1, at=round(blk.start, 1), engine=tag, why=why, text=text[:60]))
             print(f"⚠️ {tag} 第 {i + 1} 块 [{ts(blk.start)}] {why}，重试 {retry} 次仍未消除。"
