@@ -31,7 +31,6 @@ packages = ["src/transcribe_local"]
 # 源码树里它在仓库根、装成 wheel 之后就得在包目录里 —— 两种情形都要能找到。
 [tool.hatch.build.targets.wheel.force-include]
 "config.default.yaml" = "transcribe_local/config.default.yaml"
-"prompts" = "transcribe_local/prompts"
 "models/manifest.toml" = "transcribe_local/models/manifest.toml"
 "web" = "transcribe_local/web"
 

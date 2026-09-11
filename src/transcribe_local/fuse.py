@@ -15,7 +15,6 @@ from pathlib import Path
 
 import httpx
 
-from . import paths
 
 from .divergence import Divergence
 
@@ -34,7 +33,15 @@ def _terms_block(files: list[str]) -> str:
 
 
 def system_prompt(cfg: dict) -> str:
-    prompt = (paths.root() / cfg["p3"]["prompt"]).read_text(encoding="utf-8").strip()
+    """默认用内置的那份；配了 p3.prompt 就用你自己的，但会喊一声。"""
+    from ._merge_zh import PROMPT
+    custom = (cfg["p3"].get("prompt") or "").strip()
+    if custom:
+        prompt = Path(custom).expanduser().read_text(encoding="utf-8").strip()
+        print(f"ℹ️ 用的是你自己的提示词（{custom}），不是内置那份 —— "
+              f"成绩不再与我们发布的数字可比。")
+    else:
+        prompt = PROMPT.strip()
     return prompt + _terms_block(cfg["terms"].get("files") or [])
 
 

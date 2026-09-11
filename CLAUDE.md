@@ -49,7 +49,7 @@
 | 本机服务（标准库） | `src/transcribe_local/server.py` |
 | 界面 | `web/index.html`（单文件，无构建步骤） |
 | 模型清单与下载 | `src/transcribe_local/models.py` · `models/manifest.toml` |
-| 融合提示词 | `prompts/merge.zh.md` |
+| 融合提示词 | `src/transcribe_local/_merge_zh.py`（生成的，在包里，不是单独文件） |
 | 全部参数 | `config.default.yaml` |
 
 ## 跑
@@ -88,12 +88,16 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 
 ## 改提示词之前
 
-`prompts/merge.zh.md` **是生成的，不要手改。** 它从我们生产线那份融合提示词同步而来 ——
+`src/transcribe_local/_merge_zh.py` **是生成的，不要手改。** 它从我们生产线那份融合提示词同步而来 ——
 判断规则逐字相同（72% 字符原封不动），只有四处不同，且都是「本地根本没有那个东西」：
 没有主轨 · 说话人来自共用声纹分段 · 不联网 · 不写文件不出报告。
 
 这样做的理由：两份各自手改一定会漂，而 P3 的 run-to-run 方差本来就大 ——
 漂了之后「本地版成绩不如生产线」到底是提示词差异还是引擎差异，根本分不清。
+
+**放进代码而不是放成一个 `.md`**，是为了挡住「随手打开改一行」。
+⚠️ **这不是加密，也不要对外说成加密**：任何人把 `base_url` 指向自己的一个小服务，
+就能原样收到这段文字（实测 20 行 Python 即可）。真正的商业保护在 `LICENSE`（BSL 1.1），不在这里。
 
 **大模型对措辞极其敏感，改动要最小化**；单样本会骗人，**同配置至少跑 3 遍比均值**再下结论。
 
