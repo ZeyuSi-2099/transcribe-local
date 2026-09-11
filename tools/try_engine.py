@@ -35,7 +35,7 @@ def build(kind: str, d: Path, threads: int):
     if kind == "funasr_nano":
         return R.from_funasr_nano(
             encoder_adaptor=str(_pick(d, "encoder_adaptor")), llm=str(_pick(d, "llm")),
-            embedding=str(_pick(d, "embedding")), tokenizer=str(d / "tokenizer"),
+            embedding=str(_pick(d, "embedding")), tokenizer=str(next((q for q in d.iterdir() if q.is_dir() and (q / "tokenizer.json").exists()), d / "tokenizer")),
             num_threads=threads, language="zh")
     if kind in ("sense_voice", "sense_voice_nano"):
         return R.from_sense_voice(model=str(_pick(d, "model")), tokens=tok, num_threads=threads,

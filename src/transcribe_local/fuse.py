@@ -230,6 +230,10 @@ def _finish(blocks: list[dict], owned: dict, spare: dict) -> tuple[list[str], li
 
 # ═══════════════════════════ ① OpenAI 协议 · 两阶段分批 ═══════════════════════════
 
+class Truncated(RuntimeError):
+    """被 max_tokens 砍断。不接受残缺稿（红线）—— 但也不整单报废：把这一轮切成两半再各要一次。"""
+
+
 class _Usage:
     def __init__(self):
         self.hit = self.miss = self.out = self.reasoning = self.calls = self.searches = 0
@@ -333,8 +337,8 @@ def _call(cfg: dict, sysmsg: str, user: str, usage: _Usage, online: bool, max_tu
         usage.add(data.get("usage", {}))
         finish = ch.get("finish_reason")
         if finish == "length":
-            raise RuntimeError(f"这一批被 max_tokens({payload['max_tokens']}) 截断了，后半截没生成。"
-                               f"不接受残缺稿 —— 把 p3.max_tokens 调大，或把 p3.round_tokens 调小再跑。")
+            raise Truncated(f"这一批被 max_tokens({payload['max_tokens']}) 截断了，后半截没生成"
+                            f"（输出 {data.get('usage', {}).get('completion_tokens', '?')} tok，多半是推理占满了）。")
         msgs.append(msg)
         tcs = msg.get("tool_calls")
         if not tcs:
@@ -357,8 +361,59 @@ def _call(cfg: dict, sysmsg: str, user: str, usage: _Usage, online: bool, max_tu
     return out, finish or ""
 
 
+SIMPLE_USER = """以下是第 {first}–{last} 块。**输出必须是 {keep} 行**（一块一行，与输入块数相同）。
+
+{chunk}
+{ledger}"""
+
+
+def _fuse_simple(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> str:
+    """旧工作流（发布前那版）：离线提示词、固定每批 8 块硬切、不重叠、不通读全篇、不联网。
+    留着不是为了用，是为了**对照**：两阶段那套是与 SaaS 一致的正式路，但要拿同口径的三遍均值证明它不比这个差。"""
+    p3 = cfg["p3"]
+    sysmsg = system_prompt(cfg, online=False)
+    blocks = split_blocks(p3_input)
+    size = int(p3.get("blocks_per_call", 8))
+    usage = _Usage()
+    t0 = time.time()
+    spans = [(i, lo, min(lo + size, len(blocks))) for i, lo in enumerate(range(0, len(blocks), size))]
+    done = [0]
+
+    def one(span):
+        idx, lo, hi = span
+        rows = ledger_rows(found, lo + 1, hi)
+        user = SIMPLE_USER.format(first=lo + 1, last=hi, keep=hi - lo,
+                                  chunk="\n\n".join(b["text"] for b in blocks[lo:hi]),
+                                  ledger=(f"\n## 分歧册（本批）\n\n{rows}\n" if rows else ""))
+        text, _ = _call(cfg, sysmsg, user, usage, online=False)
+        got, _ = parse_output(text)
+        done[0] += 1
+        if on_batch:
+            on_batch(done[0], len(spans))
+        return idx, got
+
+    conc = max(1, int(p3.get("concurrency", 4)))
+    with ThreadPoolExecutor(max_workers=conc) as ex:
+        results = list(ex.map(one, spans))
+    owned = {}
+    for _, got in results:
+        owned.update(got)
+    lines, miss = _finish(blocks, owned, {})
+    for i, b in enumerate(blocks):
+        if lines[i] is None or _blank(lines[i]):
+            fixed, had = _revive(b["text"])
+            lines[i] = fixed or f"[{_ts(b['sec'])} - ?] X: {MARK}"
+            print(f"    ⚠️ 第 {i + 1} 块{'模型没输出' if lines[i] is None else '被写成了空块'}，已填回并标 {MARK}。")
+    print(f"P3  simple · {len(spans)} 批 × {size} 块 · 缺 {len(miss)} 块（已填回）· {time.time() - t0:.0f}s")
+    print(f"P3  用量：{usage.line()}")
+    p3["_last"] = {"usage": vars(usage), "rounds": len(spans), "workflow": "simple"}
+    return "\n".join(lines) + "\n"
+
+
 def _fuse_openai(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> str:
     p3 = cfg["p3"]
+    if (p3.get("workflow") or "two_stage") == "simple":
+        return _fuse_simple(p3_input, found, cfg, on_batch)
     online = bool(p3.get("web_search", False)) and bool(os.environ.get("BOCHA_API_KEY"))
     if p3.get("web_search", False) and not online:
         print("ℹ️ p3.web_search 开着，但环境变量 BOCHA_API_KEY 没设 —— 这次不联网，定不下的专名会标 [❓]。")
@@ -381,19 +436,35 @@ def _fuse_openai(p3_input: str, found: list[Divergence], cfg: dict, on_batch=Non
     conc = max(1, int(p3.get("concurrency", 4)))
     done = [0]
 
-    def run_span(span):
-        idx, lo, hi = span
+    def ask(lo, hi, with_ledger=True):
+        """要第 lo–hi 块（0 起，含重叠）。被截断就对半切再各要一次 —— 推理一多就会把输出上限吃光，
+        范围小一半，推理也少一半；切到单块仍截断才认输。"""
         lo_ext = max(0, lo - overlap)
         sel = blocks[lo_ext:hi]
-        rows = ledger_rows(found, lo_ext + 1, hi)
+        rows = ledger_rows(found, lo_ext + 1, hi) if with_ledger else ""
         user = p3_input + "\n\n" + PHASE2_USER.format(
             table=table, i0=lo_ext + 1, i1=hi, t0=_ts(sel[0]["sec"]), t1=_ts(sel[-1]["sec"]), n=len(sel),
             ledger=LEDGER_HINT.format(rows=rows) if rows else "")
-        text, _ = _call(cfg, sysmsg, user, usage, online)
+        try:
+            text, _ = _call(cfg, sysmsg, user, usage, online)
+        except Truncated as e:
+            if hi - lo <= 1:
+                raise
+            mid = (lo + hi) // 2
+            print(f"    ⚠️ 第 {lo + 1}–{hi} 块那一轮{e} → 切成两半各要一次")
+            g1, d1 = ask(lo, mid, with_ledger)
+            g2, d2 = ask(mid, hi, with_ledger)
+            g1.update(g2)
+            return g1, d1 + d2
         got, drows = parse_output(text)
-        own = {b["k"] for b in blocks[lo:hi]}
         if "===DOUBT===" not in text and "❓" in text:
-            print(f"    ⚠️ 轮 {idx:02d} 正文有 [❓] 却没给存疑围栏，这一批的原因说明会缺")
+            print(f"    ⚠️ 第 {lo + 1}–{hi} 块那一轮正文有 [❓] 却没给存疑围栏，这一批的原因说明会缺")
+        return got, drows
+
+    def run_span(span):
+        idx, lo, hi = span
+        got, drows = ask(lo, hi)
+        own = {b["k"] for b in blocks[lo:hi]}
         done[0] += 1
         if on_batch:
             on_batch(done[0], len(spans))
@@ -427,12 +498,7 @@ def _fuse_openai(p3_input: str, found: list[Divergence], cfg: dict, on_batch=Non
         print(f"P3  ③ 缺口补漏 {len(miss)} 块 / {len(groups)} 处")
         for g in groups:
             lo2, hi2 = max(0, g[0] - 3), min(len(blocks), g[-1] + 4)
-            sel = blocks[lo2:hi2]
-            user = p3_input + "\n\n" + PHASE2_USER.format(
-                table=table, i0=lo2 + 1, i1=hi2, t0=_ts(sel[0]["sec"]), t1=_ts(sel[-1]["sec"]), n=len(sel),
-                ledger="")
-            text, _ = _call(cfg, sysmsg, user, usage, online)
-            got, drows = parse_output(text)
+            got, drows = ask(lo2, hi2, with_ledger=False)
             for k, line in got.items():
                 spare.setdefault(k, line)
             doubts += drows

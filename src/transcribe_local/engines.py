@@ -20,7 +20,6 @@ ROUTE = {
     "zipformer_ctc": "CTC 逐帧",
     "paraformer_2023": "非自回归",
     "qwen3_asr": "LLM 式",
-    "seaco_paraformer": "非自回归 + 热词",
     # ── 候选池（模块 2 盘点，2026-09-12）：只在 tools/try_engine.py 里跑横评，不在默认清单里 ──
     "funasr_nano": "LLM 式",
     "sense_voice": "非自回归",
@@ -42,7 +41,6 @@ PEAK_MB = {
     "zipformer_ctc": 367,
     "paraformer_2023": 243,
     "qwen3_asr": 983,
-    "seaco_paraformer": 953,
 }
 
 TAG = {
@@ -50,7 +48,6 @@ TAG = {
     "zipformer_ctc": "ZIPC",
     "paraformer_2023": "PARA",
     "qwen3_asr": "QWEN3",
-    "seaco_paraformer": "SEACO",
     "funasr_nano": "FNANO",
     "sense_voice": "SENSE",
     "sense_voice_nano": "SVNANO",
@@ -71,7 +68,7 @@ def build(engine_id: str, num_threads: int = 2):
     d = model_dir(engine_id)
     tok = str(d / "tokens.txt")
     R = sherpa_onnx.OfflineRecognizer
-    if engine_id in ("paraformer_2023", "seaco_paraformer"):
+    if engine_id == "paraformer_2023":
         return R.from_paraformer(paraformer=str(d / "model.int8.onnx"), tokens=tok, num_threads=num_threads)
     if engine_id == "zipformer_ctc":
         return R.from_zipformer_ctc(model=str(d / "model.int8.onnx"), tokens=tok, num_threads=num_threads)

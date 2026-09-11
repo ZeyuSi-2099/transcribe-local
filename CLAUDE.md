@@ -103,11 +103,9 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 
 ## 待办
 
-- [ ] **同配置各跑 3 遍取均值，换掉 README 里那张表的单样本数字。**
-      现在那些数是各跑一次的结果（已在 README 里注明不是平均值）。这一步方差很大，单样本会骗人。
+- [x] **同配置各跑 3 遍取均值，换掉 README 里那张表的单样本数字。**（2026-09-12 完成，`tools/bench.py` 一条命令出均值与极差）
 - [x] 模型许可与 `sha256` 已补齐（默认那七个；来源见 `license_src`）
-- [ ] 热词那条路：`seaco_paraformer` 已从 models/manifest.toml 摘掉（包核不实，见那里的注释）。
-      要接回来先把包核准 + 补 sha256。`engines.py` 里的适配器分支还留着，加回清单就能用。
+- [x] 热词那条路：**不做**（Duner 2026-09-11 定，热词伤引擎权重）。SeACo 适配器分支与配置项已摘。
 - [x] BSL 的 Licensor 与 Change Date 已填实（Change Date = 2030-10-01）
 - [x] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 六屏已通，标准库起服务、无新依赖
 - [ ] 英文 profile

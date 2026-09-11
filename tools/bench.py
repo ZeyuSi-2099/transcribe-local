@@ -78,6 +78,54 @@ def bad_units(gold: list[dict], text_lines: str, tb: set[str], strict: bool) -> 
     return {u["i"] for u in pend if score.verdict(u["raw"], u["eng"], tb)[0]}
 
 
+GOLD_ROLE = {"M": "M", "1": "R", "R": "R", "2": "R"}          # 金标写法：主持人 M:、受访者 1:
+
+
+def speaker_accuracy(gold: list[dict], text: str) -> tuple[int, int]:
+    """说话人准确率，按文字对齐口径（时间轴口径会把 1 秒偏差误判成整句错）。
+    把每个金标语义块对到终稿里的位置（用对齐命中位置的中位数，不用文本查找 —— 「嗯」这种短块
+    查找会落到全篇第一个「嗯」上），看落在哪一行、那一行标的是谁。返回 (对上的块数, 参与比较的块数)。"""
+    import difflib
+    spans, eng, pos = [], "", 0
+    for ln in text.splitlines():
+        m = SCORE_LINE.match(ln.strip())
+        if not m or not m.group(3).strip():
+            continue
+        t = score.nrm(m.group(3).strip())
+        spk = (m.group(2) or "").replace("[❓]", "").replace("❓", "").strip(" :：")
+        spans.append((pos, pos + len(t), spk))
+        eng += t
+        pos += len(t)
+    G, Gu = "", []
+    for g in gold:
+        G += g["n"]
+        Gu += [g["i"]] * len(g["n"])
+    g2e = {}
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, G, eng, autojunk=False).get_opcodes():
+        if op == "equal":
+            for k in range(i2 - i1):
+                g2e[i1 + k] = j1 + k
+    span = {}
+    for q, ui in enumerate(Gu):
+        span.setdefault(ui, [q, q])[1] = q
+    ok = n = 0
+    for g in gold:
+        if set(g["n"]) <= score.BC or g["i"] not in span:
+            continue                                       # 附和块不参与
+        a, b = span[g["i"]]
+        hits = sorted(g2e[q] for q in range(a, b + 1) if q in g2e)
+        if len(hits) < max(2, len(g["n"]) // 2):           # 没对上一半的块不参与
+            continue
+        mid = hits[len(hits) // 2]
+        spk = next((s for x, y, s in spans if x <= mid < y), None)
+        if spk is None:
+            continue
+        want = GOLD_ROLE.get(g["role"].strip(" :："), g["role"])
+        n += 1
+        ok += spk == want
+    return ok, n
+
+
 def route_text(rows: list[Row]) -> str:
     return "\n".join(f"[{ts(r.start)} - {ts(r.end)}] SPK{r.speaker}: {r.text}" for r in rows if r.text)
 
@@ -153,7 +201,11 @@ def main() -> None:
 
     merged_texts: list[tuple[str, str, float]] = []      # (名字, 终稿文本, 耗时)
     if a.control:
-        merged_texts.append(("control(" + top + ")", route_text(rows[enabled[0]]).replace("SPK0", "M").replace("SPK1", "R"), 0.0))
+        roles = divergence.assign_roles(rows, cfg["diarize"].get("role_assign", "talk_time"))   # 谁是 M 谁是 R 按主链的判法
+        ctl = route_text(rows[enabled[0]])
+        for spk, role in roles.items():
+            ctl = ctl.replace(f"SPK{spk}:", f"{role}:")
+        merged_texts.append(("control(" + top + ")", ctl, 0.0))
     elif a.merged:
         for p in a.merged:
             merged_texts.append((p.name, p.read_text(encoding="utf-8"), 0.0))
@@ -169,15 +221,17 @@ def main() -> None:
             print(f"    落盘 {p} ({sec:.0f}s)")
 
     # 打分
-    print("\n{:<28} {:>6} {:>8} {:>6} {:>6} {:>7}".format("终稿", "算问题", "不豁免", "拿回", "回退", "耗时s"))
+    print("\n{:<28} {:>6} {:>8} {:>6} {:>6} {:>9} {:>7}".format("终稿", "算问题", "不豁免", "拿回", "回退", "说话人", "耗时s"))
     cols: list[tuple[int, int, int, int]] = []
     for name, text, sec in merged_texts:
         b1 = bad_units(gold, text, tb, strict=False)
         b2 = bad_units(gold, text, tb, strict=True)
         regress = {u for u in b1 if all(u not in s for s in single.values())}   # 四路都对、终稿错
         gain = len(single[top]) - len(b1)
+        sp_ok, sp_n = speaker_accuracy(gold, text)
+        sp = f"{sp_ok / sp_n:.1%}" if sp_n else "—"
         cols.append((len(b1), len(b2), gain, len(regress)))
-        print("{:<28} {:>6} {:>8} {:>6} {:>6} {:>7.0f}".format(name[:28], len(b1), len(b2), gain, len(regress), sec))
+        print("{:<28} {:>6} {:>8} {:>6} {:>6} {:>9} {:>7.0f}".format(name[:28], len(b1), len(b2), gain, len(regress), sp, sec))
         if regress:
             print("    回退块：" + " ".join(f"#{u}" for u in sorted(regress)))
     if len(cols) > 1:

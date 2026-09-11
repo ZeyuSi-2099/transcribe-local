@@ -109,27 +109,57 @@ def _quietest(x: np.ndarray, t: float, window: float, probe: float = 0.2) -> flo
     return best
 
 
+def _turn_points(segs: list[Segment], s: float, e: float, min_piece: float) -> list[float]:
+    """并集段 [s, e] 内的换人点：相邻两段说话人不同，取两段之间的中点。
+    离段首尾不足 min_piece 的不要（切出来的碎片太短，附和块会被劈碎、说话人归属反而更差）。"""
+    inside = sorted((g for g in segs if g.end > s and g.start < e), key=lambda g: g.start)
+    pts = []
+    for a, b in zip(inside, inside[1:]):
+        if a.speaker == b.speaker:
+            continue
+        t = (a.end + b.start) / 2
+        if t - s >= min_piece and e - t >= min_piece and (not pts or t - pts[-1] >= min_piece):
+            pts.append(t)
+    return pts
+
+
 def chop(x: np.ndarray, segs: list[Segment], cfg: dict) -> list[Block]:
-    """并集后的长块切成 ASR 吃得下的小块，再给每块贴上说话人。"""
+    """并集后的长块切成 ASR 吃得下的小块，再给每块贴上说话人。
+
+    strategy:
+      even     等分（默认）。
+      quietest 等分后把刀口挪到 ±2 秒内最安静的一刻。
+      turns    **换人的地方优先下刀**：先按声纹分段里的换人点把并集段切开（碎片至少 min_block 秒），
+               每一片再按 max_length 等分。目的是别让主持人的问和受访者的答落在同一块里 ——
+               实测一个 15 秒的块里两人混说时，说话人按块贴标签只能对一半。
+    """
     ch, dur = cfg["chop"], len(x) / SR
     spans = [(s.start, s.end) for s in segs]
     if cfg["vad"]["enabled"]:
         spans += vad_spans(x, cfg)
     pad, maxlen = float(ch["pad"]), float(ch["max_length"])
-    quietest = ch.get("strategy") == "quietest"
+    strategy = ch.get("strategy", "even")
+    quietest = strategy == "quietest"
     limit = maxlen + 2.0 if quietest else maxlen
+    min_block = float(ch.get("min_block", 1.5))
 
     cuts: list[tuple[float, float]] = []
     for s, e in _union(spans):
         s, e = max(0.0, s - pad), min(dur, e + pad)
-        n = max(1, int(np.ceil((e - s) / maxlen)))
-        edges = [s + i * (e - s) / n for i in range(n + 1)]
-        if quietest and n > 1:                      # 刀口挪到窗口里最安静的一刻
-            for i in range(1, n):
-                moved = _quietest(x, edges[i], window=2.0)
-                if moved - edges[i - 1] <= limit and edges[i + 1] - moved <= limit:
-                    edges[i] = moved
-        cuts += list(zip(edges[:-1], edges[1:]))
+        pieces = [(s, e)]
+        if strategy == "turns":
+            pts = _turn_points(segs, s, e, min_block)
+            bounds = [s] + pts + [e]
+            pieces = list(zip(bounds[:-1], bounds[1:]))
+        for ps, pe in pieces:
+            n = max(1, int(np.ceil((pe - ps) / maxlen)))
+            edges = [ps + i * (pe - ps) / n for i in range(n + 1)]
+            if quietest and n > 1:                      # 刀口挪到窗口里最安静的一刻
+                for i in range(1, n):
+                    moved = _quietest(x, edges[i], window=2.0)
+                    if moved - edges[i - 1] <= limit and edges[i + 1] - moved <= limit:
+                        edges[i] = moved
+            cuts += list(zip(edges[:-1], edges[1:]))
 
     blocks = [Block(a, b, _speaker_of(a, b, segs)) for a, b in cuts]
     return _fill_forward(blocks)

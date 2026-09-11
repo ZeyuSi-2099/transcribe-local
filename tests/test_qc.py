@@ -72,3 +72,11 @@ def test_residue_and_breaker_are_reported():
     assert rep.stats["residue"]["FRED2"]["count"] == 2
     assert any("复读" in f and "第 3 块" in f for f in rep.fail)
     assert "❌" in qc.dump(rep)
+
+
+def test_turn_points_split_between_speakers_and_respect_min_piece():
+    from transcribe_local.diarize import Segment, _turn_points
+    segs = [Segment(0.0, 6.0, 0), Segment(6.2, 12.0, 1), Segment(12.1, 12.8, 0), Segment(12.9, 20.0, 1)]
+    pts = _turn_points(segs, 0.0, 20.0, min_piece=1.5)
+    assert len(pts) == 2 and 6.0 <= pts[0] <= 6.2 and 12.0 <= pts[1] <= 12.1   # 12.8–12.9 那处离上一刀太近，不下
+    assert _turn_points([Segment(0.0, 20.0, 0)], 0.0, 20.0, 1.5) == []
