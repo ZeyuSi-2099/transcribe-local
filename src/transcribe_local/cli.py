@@ -267,7 +267,8 @@ def _config(a) -> int:
 
 def _serve(a) -> int:
     from . import server
-    return server.serve(_load_cfg(a), a.out, port=a.port, open_browser=not a.no_open)
+    return server.serve(_load_cfg(a), a.out, port=a.port, open_browser=not a.no_open,
+                        cfg_path=a.config)
 
 
 def _doctor(a) -> int:

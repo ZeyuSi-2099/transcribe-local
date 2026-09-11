@@ -98,6 +98,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "transcribe-local"
     cfg: dict = {}
     out: Path = Path("out")
+    cfg_path: Path = Path("config.yaml")
 
     def log_message(self, *a):                                  # 默认那套访问日志太吵
         pass
@@ -167,6 +168,13 @@ class Handler(BaseHTTPRequestHandler):
                 "jobs": [{"id": j.id, "state": j.state, "stem": j.audio.stem} for j in JOBS.values()],
             })
 
+        if route == "p3/presets":
+            return self._json({"presets": P3_PRESETS, "current": self.cfg["p3"],
+                               "config_path": str(self.cfg_path)})
+
+        if route == "p3/test":
+            return self._json(_probe(self.cfg["p3"]))
+
         if route == "config":
             return self._json({"text": config.DEFAULT_PATH.read_text(encoding="utf-8"),
                                "provenance": config.PROVENANCE})
@@ -235,6 +243,19 @@ class Handler(BaseHTTPRequestHandler):
             j.start()
             return self._json({"job": jid})
 
+        if route == "p3":
+            req = json.loads(body or b"{}")
+            p3 = self.cfg["p3"]
+            for k in ("base_url", "model", "api_key_env"):
+                if k in req:
+                    p3[k] = req[k]
+            # ⚠️ 换后端必须连 extra 一起换：reasoning_effort 是 DeepSeek 专属，
+            #    原样带去本机模型那边多半直接 400。这正是手改配置最容易漏的一步。
+            p3["extra"] = req.get("extra", {})
+            _save_p3(self.cfg_path, p3)
+            return self._json({"ok": True, "p3": p3, "saved_to": str(self.cfg_path),
+                               "probe": _probe(p3)})
+
         if route == "terms":
             req = json.loads(body or b"{}")
             p = Path(req["path"]).expanduser()
@@ -263,6 +284,60 @@ def _needed(cfg: dict) -> list[str]:
     return need
 
 
+P3_PRESETS = [
+    {"id": "deepseek-flash", "name": "DeepSeek Flash", "kind": "api",
+     "base_url": "https://api.deepseek.com/v1", "model": "deepseek-flash",
+     "api_key_env": "DEEPSEEK_API_KEY", "extra": {"reasoning_effort": "high"},
+     "note": "默认。便宜，一份 38 分钟访谈几毛钱"},
+    {"id": "deepseek-pro", "name": "DeepSeek V4 Pro", "kind": "api",
+     "base_url": "https://api.deepseek.com/v1", "model": "deepseek-v4-pro",
+     "api_key_env": "DEEPSEEK_API_KEY", "extra": {"reasoning_effort": "high"},
+     "note": "更强一档，贵约 3 倍"},
+    {"id": "ollama", "name": "本机 Ollama", "kind": "local",
+     "base_url": "http://127.0.0.1:11434/v1", "model": "qwen3:8b",
+     "api_key_env": "", "extra": {},
+     "note": "全程离线。先 ollama serve + ollama pull qwen3:8b"},
+    {"id": "mlx", "name": "本机 mlx_lm / LM Studio", "kind": "local",
+     "base_url": "http://127.0.0.1:11435/v1", "model": "mlx-community/Qwen3-8B-4bit",
+     "api_key_env": "", "extra": {},
+     "note": "全程离线。Qwen3 系记得启动时关思考模式"},
+]
+
+
+def _save_p3(path: Path, p3: dict) -> None:
+    """把 p3 的三件套 + extra 写回用户配置，其余键原样保留。"""
+    import yaml
+    cur = {}
+    if path.exists():
+        cur = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    cur.setdefault("p3", {})
+    for k in ("base_url", "model", "api_key_env", "extra"):
+        cur["p3"][k] = p3.get(k)
+    path.write_text(yaml.safe_dump(cur, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def _probe(p3: dict) -> dict:
+    """试一下这个后端到底能不能用 —— 不光看端口通不通，真发一次最小请求。"""
+    import os as _os
+    local = p3["base_url"].startswith(("http://127.0.0.1", "http://localhost"))
+    env = p3.get("api_key_env") or ""
+    key = _os.environ.get(env, "") if env else ""
+    if not local and env and not key:
+        return {"ok": False, "why": f"环境变量 {env} 没设 —— 密钥只从环境变量读，不会写进配置文件"}
+    try:
+        import httpx
+        payload = {"model": p3["model"], "temperature": 0, "max_tokens": 8,
+                   "messages": [{"role": "user", "content": "回复 ok 两个字"}]}
+        payload.update(p3.get("extra") or {})
+        r = httpx.post(p3["base_url"].rstrip("/") + "/chat/completions", json=payload,
+                       headers={"Authorization": f"Bearer {key}"} if key else {}, timeout=60)
+        if r.status_code != 200:
+            return {"ok": False, "why": f"HTTP {r.status_code}：{r.text[:160]}"}
+        return {"ok": True, "why": "通了，能正常回话"}
+    except Exception as e:
+        return {"ok": False, "why": f"{type(e).__name__}：{str(e)[:120]}"}
+
+
 def _reachable(base_url: str) -> bool:
     try:
         import httpx
@@ -272,11 +347,13 @@ def _reachable(base_url: str) -> bool:
         return False
 
 
-def serve(cfg: dict, out: Path, port: int = 0, open_browser: bool = True) -> int:
+def serve(cfg: dict, out: Path, port: int = 0, open_browser: bool = True,
+          cfg_path: Path | None = None) -> int:
     if not WEB.is_dir():
         print(f"找不到界面文件（{WEB}）。从源码跑的话确认仓库完整。")
         return 2
     Handler.cfg, Handler.out = cfg, out
+    Handler.cfg_path = Path(cfg_path or "config.yaml")
     out.mkdir(parents=True, exist_ok=True)
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)      # ⛔ 只听本机，不对局域网开放

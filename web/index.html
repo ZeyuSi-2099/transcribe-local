@@ -124,6 +124,19 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
 .stat b{display:block;font-family:var(--mono);font-size:23px;font-weight:500;letter-spacing:-.5px;line-height:1.2}
 .stat span{font-size:12px;color:var(--inkFaint)}
 
+/* Phase 3 后端选择 */
+.opts{display:flex;flex-direction:column;gap:8px}
+.opt{display:grid;grid-template-columns:44px 1fr;gap:12px;align-items:start;width:100%;text-align:left;
+  cursor:pointer;font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);
+  border-radius:8px;padding:11px 14px;transition:border-color .12s,background .12s}
+.opt:hover{border-color:var(--accent)}
+.opt[aria-checked="true"]{border-color:var(--accent);background:var(--accentTint)}
+.opt .ltr{font-family:var(--mono);font-size:10px;letter-spacing:.04em;padding:3px 0;text-align:center;
+  border:1px solid var(--line);border-radius:99px;color:var(--inkFaint);background:var(--panel)}
+.opt[aria-checked="true"] .ltr{background:var(--accent);border-color:var(--accent);color:#FBF7EE}
+.opt b{font-weight:600;font-size:14px}
+.opt .why{display:block;color:var(--inkFaint);font-size:12.5px;margin-top:2px;line-height:1.6}
+
 /* 设置 */
 .knob{border-bottom:1px solid var(--line2);padding:11px 0}
 .knob:last-child{border-bottom:0}
@@ -242,6 +255,26 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
   <h1>参数</h1>
   <p class="sub">每个默认值都标了「从哪来的」。<b>别家的转录工具也给参数，但没人告诉你这个数是怎么定的。</b>
      改值请编辑项目目录下的 <span class="mono">config.yaml</span>（<span class="mono">config --init</span> 生成），改完重启服务。</p>
+  <h2 style="margin-top:0">Phase 3 · 融合定字后端</h2>
+  <p class="sub" style="margin-bottom:12px">两条路都支持，随时切。<b>云端和本机说的是同一个协议</b>，换后端只是换三个字段。</p>
+  <div class="card" id="p3card">
+    <div class="opts" id="p3presets"></div>
+    <div class="row" style="margin-top:14px">
+      <div style="flex:1;min-width:230px"><label class="f">base_url</label><input type="text" id="p3url"></div>
+      <div style="flex:1;min-width:180px"><label class="f">model</label><input type="text" id="p3model"></div>
+      <div style="flex:1;min-width:180px"><label class="f">密钥的环境变量名（本机模型留空）</label><input type="text" id="p3key"></div>
+    </div>
+    <p class="sub" id="p3extra" style="margin:10px 0 0"></p>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="p3save">保存并测试</button>
+      <button class="btn ghost" id="p3test">只测试</button>
+      <span id="p3msg" style="font-size:13px"></span>
+    </div>
+    <p class="sub" style="margin:12px 0 0">⛔ 密钥只从环境变量读，<b>永远不会写进配置文件、不会进日志</b>。
+       这里填的是变量名，不是密钥本身。</p>
+  </div>
+
+  <h2>全部参数</h2>
   <div class="row" id="tally" style="margin-bottom:18px"></div>
   <div class="card" id="knobs"></div>
 </section>
@@ -286,7 +319,7 @@ let STATE = null, JOB = null, RESULT = null, SRC = null;
 function show(v){
   $$('section').forEach(s => s.classList.toggle('hide', s.id !== 'v-' + v));
   $$('nav .tab').forEach(b => b.setAttribute('aria-current', String(b.dataset.view === v)));
-  if (v === 'settings') loadKnobs();
+  if (v === 'settings'){ loadP3(); loadKnobs(); }
   if (v === 'history') loadHistory();
 }
 $$('nav .tab').forEach(b => b.onclick = () => show(b.dataset.view));
@@ -493,6 +526,60 @@ function renderScript(merged, ledger){
     if (c) c.classList.toggle('hide');
   };
 }
+
+/* ── 设置：Phase 3 后端切换 ── */
+let P3 = null;
+function p3fill(x){
+  $('#p3url').value = x.base_url || '';
+  $('#p3model').value = x.model || '';
+  $('#p3key').value = x.api_key_env || '';
+  const ex = x.extra && Object.keys(x.extra).length ? JSON.stringify(x.extra) : '（无）';
+  const local = (x.base_url || '').startsWith('http://127.0.0.1') || (x.base_url || '').startsWith('http://localhost');
+  $('#p3extra').innerHTML = `后端专属参数：<span class="mono">${esc(ex)}</span>　`
+    + (local ? '· <b>本机模型：全程离线，一个字节都不出这台机器。</b>'
+             : '· <b>云端 API：这一步会把转录文本发给对方，音频不会发。</b>');
+}
+async function loadP3(){
+  if (P3) return;
+  P3 = await (await fetch('/api/p3/presets')).json();
+  $('#p3presets').innerHTML = P3.presets.map(x => `
+    <button class="opt" data-p3="${x.id}" role="radio" aria-checked="false"><span class="ltr">${
+      x.kind === 'api' ? 'API' : '本机'}</span><span><b>${esc(x.name)}</b>
+      <span class="why">${esc(x.note)}　<span class="mono">${esc(x.model)}</span></span></span></button>`).join('');
+  $('#p3presets').querySelectorAll('.opt').forEach(b => b.onclick = () => {
+    const x = P3.presets.find(q => q.id === b.dataset.p3);
+    $('#p3presets').querySelectorAll('.opt').forEach(o => o.setAttribute('aria-checked', String(o === b)));
+    P3.current = {...P3.current, base_url: x.base_url, model: x.model,
+                  api_key_env: x.api_key_env, extra: x.extra};
+    p3fill(P3.current); $('#p3msg').textContent = '改完记得点「保存并测试」';
+  });
+  p3fill(P3.current);
+  const hit = P3.presets.find(x => x.base_url === P3.current.base_url && x.model === P3.current.model);
+  if (hit) $(`#p3presets .opt[data-p3="${hit.id}"]`).setAttribute('aria-checked', 'true');
+  $('#p3msg').innerHTML = `配置写到 <span class="mono">${esc(P3.config_path)}</span>`;
+}
+function p3read(){
+  const url = $('#p3url').value.trim();
+  const local = url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost');
+  // ⚠️ 切到本机模型时必须把 extra 清掉：reasoning_effort 是 DeepSeek 专属，
+  //    带过去多半直接 400。这是手改配置最容易漏的一步，所以由界面代劳。
+  return {base_url: url, model: $('#p3model').value.trim(), api_key_env: $('#p3key').value.trim(),
+          extra: local ? {} : (P3.current.extra || {})};
+}
+function p3show(r){
+  const ok = r.ok !== false;
+  $('#p3msg').innerHTML = `<span style="color:var(--${ok ? 'ok' : 'warn'})">${ok ? '✓' : '✗'} ${esc(r.why || '')}</span>`;
+}
+document.addEventListener('click', async e => {
+  if (e.target.id === 'p3test'){ $('#p3msg').textContent = '测试中…'; p3show(await (await fetch('/api/p3/test')).json()); }
+  if (e.target.id === 'p3save'){
+    $('#p3msg').textContent = '保存并测试中…';
+    const r = await (await fetch('/api/p3', {method:'POST', body: JSON.stringify(p3read())})).json();
+    if (r.error) return p3show({ok:false, why:r.error});
+    P3.current = r.p3; p3fill(r.p3); p3show(r.probe);
+    STATE = await (await fetch('/api/state')).json();
+  }
+});
 
 /* ── 设置：参数 + 来源标注 ── */
 let KNOBS = null;
