@@ -74,9 +74,13 @@ engines:
   enabled:                       # 想少跑几路就删几行（少一路 = 快，但融合的票少一张）
 {engines}
 p3:
-  base_url: {base_url}           # 换后端只改这两行；说 OpenAI 协议的都能接
+  # 两条路都支持，换后端只改这三行（云端和本机说的是同一个协议）：
+  #   ① API（默认）    base_url: https://api.deepseek.com/v1 · model: deepseek-flash
+  #                    ⚠️ 这一步会把转录文本发给对方（音频不会）
+  #   ② 本机、全程离线  base_url: http://127.0.0.1:11434/v1  · model: qwen3:8b
+  base_url: {base_url}
   model: {model}
-  # api_key_env: TRANSCRIBE_LOCAL_API_KEY   # 接云端 API 时打开，密钥只从环境变量读
+  api_key_env: {key_env}         # 只从环境变量读，绝不写进这个文件
 
 terms:
   files: []                      # 术语库路径，例如 ["terms/zh_我的行业.md"]
@@ -89,4 +93,5 @@ def starter(cfg: dict) -> str:
     return STARTER.format(
         engines="".join(f"    - {e}\n" for e in cfg["engines"]["enabled"]),
         base_url=cfg["p3"]["base_url"], model=cfg["p3"]["model"],
+        key_env=cfg["p3"].get("api_key_env", "DEEPSEEK_API_KEY"),
     )

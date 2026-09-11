@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -166,9 +167,18 @@ def _setup(a) -> int:
         dst.write_text(config.starter(cfg), encoding="utf-8")
         print(f"   ✓ 写好了 {dst} —— 只放常改的那几个键，其余走默认值")
 
-    print("\n④ Phase 3（融合定字）")
-    print(f"   现在指向 {cfg['p3']['model']} @ {cfg['p3']['base_url']}")
-    print("   本机模型要先把服务起起来；也可以把 base_url 改到任何说 OpenAI 协议的 API。")
+    print("\n④ Phase 3（融合定字）—— 两条路，都支持")
+    p3 = cfg["p3"]
+    print(f"   当前指向：{p3['model']} @ {p3['base_url']}")
+    env = p3.get("api_key_env", "")
+    if p3["base_url"].startswith(("http://127.0.0.1", "http://localhost")):
+        print("   这是本机模型 —— 全程离线，记得先把服务起起来（Ollama / LM Studio / mlx_lm.server）。")
+    else:
+        ok = bool(os.environ.get(env))
+        print(f"   这是云端 API。{'✓ 已读到' if ok else '✗ 还没有'} 环境变量 {env}"
+              + ("" if ok else f"  ——  export {env}=... 之后再跑"))
+        print("   ⚠️ 走 API 这条路，这一步会把**转录文本**发给你选的那家（音频不会）。")
+        print("      要全程离线，把 config.yaml 里的 base_url 改到本机服务即可，同一条代码路径。")
     print("   不想现在管它就先跑 `run --no-fuse`，只出分歧册。")
 
     print(f"\n就绪。下一步：\n   transcribe-local run 你的录音.m4a")

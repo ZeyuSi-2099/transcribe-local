@@ -146,6 +146,7 @@ def _call(url: str, headers: dict, p3: dict, sysmsg: str, user: str) -> str:
     payload = {
         "model": p3["model"],
         "temperature": float(p3.get("temperature", 0.0)),
+        "max_tokens": int(p3.get("max_tokens", 64000)),
         "stream": False,
         "messages": [{"role": "system", "content": sysmsg}, {"role": "user", "content": user}],
     }
@@ -153,9 +154,16 @@ def _call(url: str, headers: dict, p3: dict, sysmsg: str, user: str) -> str:
     last: Exception | None = None
     for _ in range(int(p3.get("max_retry", 2)) + 1):
         try:
-            r = httpx.post(url, json=payload, headers=headers, timeout=float(p3.get("timeout", 600)))
+            r = httpx.post(url, json=payload, headers=headers, timeout=float(p3.get("timeout", 1200)))
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
-        except Exception as e:                      # 网络抖动 / 后端没起来 / 超时
+            ch = r.json()["choices"][0]
+            if ch.get("finish_reason") == "length":
+                # 被 max_tokens 砍断 = 这一批的后半截根本没生成。上游生产线的规矩是
+                # **报错退出、绝不落残缺稿** —— 静默收下半截等于悄悄丢内容，踩红线。
+                raise RuntimeError(
+                    f"这一批被 max_tokens({payload.get('max_tokens')}) 截断了，后半截没生成。"
+                    f"不接受残缺稿 —— 把 p3.max_tokens 调大，或把 p3.blocks_per_call 调小再跑。")
+            return ch["message"]["content"]
+        except Exception as e:                      # 网络抖动 / 后端没起来 / 超时 / 截断
             last = e
     raise RuntimeError(f"Phase 3 调用失败（{p3['base_url']} · {p3['model']}）：{last}")

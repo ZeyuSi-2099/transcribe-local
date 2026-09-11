@@ -160,7 +160,9 @@ class Handler(BaseHTTPRequestHandler):
                             "size_mb": mf[m].size_mb if m in mf else 0} for m in need],
                 "ffmpeg": audio.have_ffmpeg(),
                 "p3": {"model": cfg["p3"]["model"], "base_url": cfg["p3"]["base_url"],
-                       "reachable": _reachable(cfg["p3"]["base_url"])},
+                       "reachable": _reachable(cfg["p3"]["base_url"]),
+                       "key_env": cfg["p3"].get("api_key_env", ""),
+                       "local": cfg["p3"]["base_url"].startswith(("http://127.0.0.1", "http://localhost"))},
                 "terms": cfg["terms"].get("files") or [],
                 "jobs": [{"id": j.id, "state": j.state, "stem": j.audio.stem} for j in JOBS.values()],
             })
