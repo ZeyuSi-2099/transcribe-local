@@ -102,7 +102,7 @@
 
 ## 许可
 
-**Business Source License 1.1**，`Change Date` 之后自动转为 Apache License 2.0。
+**Business Source License 1.1**，**2030-10-01** 之后自动转为 Apache License 2.0。
 
 BSL **不是 OSI 认定的开源许可**。在转换日期之前，除了「拿它向第三方提供转录服务、
 或做成以转录为主要价值的商业产品」之外，其余用途 —— 个人、研究、企业内部自用 —— 都是允许的。
