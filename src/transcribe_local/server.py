@@ -75,7 +75,8 @@ class Job:
                              no_fuse=self.no_fuse, emit=self._emit)
             self.result = dict(
                 stem=r.stem, minutes=round(r.minutes, 1), blocks=r.blocks, segments=r.segments,
-                engines=r.engines, qc=r.qc, substantive=r.substantive, fillers=r.fillers,
+                engines=r.engines, qc=r.qc, qc_fail=r.qc_fail, qc_warn=r.qc_warn,
+                substantive=r.substantive, fillers=r.fillers,
                 uncertain=r.uncertain, seconds=round(r.seconds), merged=r.merged, ledger=r.ledger,
                 exports=[p.name for p in r.exports],
             )

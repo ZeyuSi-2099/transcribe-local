@@ -17,6 +17,7 @@ import httpx
 
 
 from .divergence import Divergence
+from .transcript import MARK, has_words, parse_line
 
 
 
@@ -76,32 +77,32 @@ def _ts(x: float) -> str:
     return f"{int(x) // 60:02d}:{x - (int(x) // 60) * 60:04.1f}"
 
 
-MARK = "[❓]"
-
-
 def _blank(line: str) -> bool:
     """这一行除了标点和 [❓] 之外一个字都没有 —— 那不是标存疑，是这块话丢了。"""
-    body = re.sub(r"^\s*\[[^\]]*\]\s*[MR]?\s*[:：]?\s*", "", line).replace(MARK, "")
-    return not re.search(r"[0-9A-Za-z\u4e00-\u9fff]", body)
+    ln = parse_line(line)
+    return not has_words(ln.text if ln else line)
 
 
-def _revive(block: str) -> str:
+def _revive(block: str) -> tuple[str, bool]:
     """把写空了的那一块按各路票数最多的原文填回去，并标 [❓] 送进复核。
+
+    返回 (填回后的行, 有没有内容可填)。四路都空时行仍然保留（时间码 + 说话人 + [❓]），
+    只是没有字 —— 那一块本来就没人听到内容，留一行是为了让复核的人知道这里有一段没出来。
 
     ⚠️ 这是兜底，不是功能：提示词里已经写了「每块都必须有文字」，但提示词是请求、
     代码才是保证 —— 「内容不能丢」是红线，不能只靠模型照做。
     """
     lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
     if not lines:
-        return ""
-    m = re.match(r"^(\[[^\]]*\]\s*[MR]?\s*[:：]\s*)(.*)$", lines[0])
-    prefix, main = (m.group(1), m.group(2)) if m else ("", lines[0])
+        return "", False
+    top = parse_line(lines[0])
+    prefix, main = (top.head, top.text) if top else ("", lines[0])
     cands = [main] + [re.sub(r"^\[[A-Z0-9]+\]\s*", "", ln) for ln in lines[1:]]
-    cands = [c.strip() for c in cands if c.strip()]
+    cands = [c.strip() for c in cands if c.strip() and c.strip() != "/"]     # 「/」是占位符，不是内容
     if not cands:
-        return ""
+        return f"{prefix}{MARK}", False
     best = max(cands, key=lambda c: (cands.count(c), c == main))      # 票数优先，同票取顶格那一路
-    return f"{prefix}{best} {MARK}"
+    return f"{prefix}{best} {MARK}", True
 
 
 def fuse(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> str:
@@ -137,12 +138,16 @@ def fuse(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> st
             for j, ln in enumerate(kept):
                 if not _blank(ln):
                     continue
-                fixed = _revive(src[j])
+                fixed, had = _revive(src[j])
                 if not fixed:
                     continue
                 kept[j] = fixed
-                print(f"⚠️ 第 {lo + len(chunk) - keep + j + 1} 块被写成了空块（只有 {MARK}、没有字）。"
-                      f"已按各路票数最多的原文填回并标 {MARK}，请复核。")
+                n_blk = lo + len(chunk) - keep + j + 1
+                if had:
+                    print(f"⚠️ 第 {n_blk} 块被写成了空块（只有 {MARK}、没有字）。"
+                          f"已按各路票数最多的原文填回并标 {MARK}，请复核。")
+                else:
+                    print(f"⚠️ 第 {n_blk} 块四路都没有内容，终稿这一行只留时间码和 {MARK}，请复核。")
         out += kept
         if on_batch:
             on_batch(n, len(batches))

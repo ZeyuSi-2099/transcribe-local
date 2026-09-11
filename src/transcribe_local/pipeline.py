@@ -23,6 +23,8 @@ class Result:
     blocks: int = 0
     engines: dict[str, int] = field(default_factory=dict)      # 引擎 tag → 字数
     qc: list[dict] = field(default_factory=list)               # 重试用尽仍跑飞的块
+    qc_fail: list[str] = field(default_factory=list)           # P1 质检闸：这一路 / 这一段不可信
+    qc_warn: list[str] = field(default_factory=list)           # P1 质检闸：要留意
     substantive: int = 0
     fillers: int = 0
     uncertain: int = 0                                          # 终稿里 [❓] 的处数
@@ -34,7 +36,7 @@ class Result:
 
 def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) -> Result:
     """跑完整条链。emit(kind, **kw) 是进度回调，kind 见下面各处调用。"""
-    from . import audio as au, diarize, divergence, engines, export, fuse, mem
+    from . import audio as au, diarize, divergence, engines, export, fuse, mem, qc
 
     say = emit or (lambda *a, **k: None)
     out.mkdir(parents=True, exist_ok=True)
@@ -95,6 +97,14 @@ def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) 
         (out / "work" / "qc_warnings.json").write_text(
             json.dumps(r.qc, ensure_ascii=False, indent=1), encoding="utf-8")
         say("qc", count=len(r.qc))
+
+    # P1 质检闸：四路跑完、进分歧册之前先体检。只喊不拦（四路平等、融合能补一路的缺），
+    # 但要喊得够响 —— 逐条打印 + 落盘，别让「某一路 17 秒吐空白」这种事靠事后读金标才发现。
+    rep = qc.check(rows, blocks, x, bad=r.qc)
+    (out / "work" / "qc.json").write_text(json.dumps(rep.as_dict(), ensure_ascii=False, indent=1),
+                                         encoding="utf-8")
+    r.qc_fail, r.qc_warn = rep.fail, rep.warn
+    say("p1qc", fail=rep.fail, warn=rep.warn)
 
     p3in, ledger, found = divergence.build(rows, cfg)
     (out / "work" / "p3_input.md").write_text(p3in, encoding="utf-8")

@@ -5,19 +5,19 @@
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-LINE = re.compile(r"^\[(?P<a>[\d:.]+)\s*-\s*(?P<b>[\d:.]+)\]\s*(?P<spk>[^:]+):\s*(?P<text>.*)$")
+from .transcript import parse_line
+
 CREDIT = "由 Transcribe Local 生成 · transcribe.solutions"
 
 
 def parse(transcript: str) -> list[tuple[str, str, str, str]]:
     rows = []
-    for ln in transcript.splitlines():
-        m = LINE.match(ln.strip())
-        if m:
-            rows.append((m["a"], m["b"], m["spk"].strip(), m["text"].strip()))
+    for raw in transcript.splitlines():
+        ln = parse_line(raw)
+        if ln:
+            rows.append((ln.a, ln.b, ln.spk, ln.text))
     return rows
 
 

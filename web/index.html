@@ -559,6 +559,13 @@ function onEvent(d){
         坏块原样留着没改写也没丢 —— 改写等于把问题藏起来，而另外几路对同一块有自己的版本，融合那步本来就能救回来。
         清单在 <span class="mono">out/${JOB}/work/qc_warnings.json</span>。</div>`;
       break;
+    case 'p1qc': {
+      const items = [...d.fail.map(x => `<li>❌ ${esc(x)}</li>`), ...d.warn.map(x => `<li>⚠️ ${esc(x)}</li>`)];
+      $('#runtail').innerHTML += items.length
+        ? `<div class="note"><b>四路听完先体检。</b>只喊不拦：❌ 是这一路这一段不可信，融合会靠另外几路补；⚠️ 是要留意。<ul style="margin:6px 0 0 18px;padding:0">${items.join('')}</ul></div>`
+        : `<div class="note">四路听完先体检：✅ 没有发现整路空、丢段、漏切。</div>`;
+      break;
+    }
     case 'divergence': stage('分歧', `实质 <b>${d.substantive}</b> 处 + 语气词 ${d.fillers} 处（已折叠）`); break;
     case 'stage':      if (d.name === 'P3') stage('P3', esc(d.text)); break;
     case 'batch':      { const s = $('#stages').lastElementChild;
@@ -588,13 +595,14 @@ async function loadResult(){
     [Object.keys(r.engines).length, '路引擎'],
   ].map(([n,l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
 
-  $('#resqc').innerHTML = r.qc.length
-    ? `<div class="note"><b>${r.qc.length} 块有引擎跑飞</b>（原样保留、没丢内容）：` +
-      r.qc.slice(0,6).map(q => `${q.engine} 第 ${q.block} 块 ${q.why}`).join('、') + '</div>' : '';
+  const qf = r.qc_fail || [], qw = r.qc_warn || [];
+  $('#resqc').innerHTML = (qf.length || qw.length)
+    ? `<div class="note"><b>听的那一层体检结果</b>（只喊不拦，融合会靠另外几路补）：<ul style="margin:6px 0 0 18px;padding:0">` +
+      [...qf.map(x => `<li>❌ ${esc(x)}</li>`), ...qw.map(x => `<li>⚠️ ${esc(x)}</li>`)].join('') + '</ul></div>' : '';
 
   $('#resquality').innerHTML = `<b>这份稿子离商用还有多远，我们直说。</b>
-    同一条 38 分钟访谈、461 个实质语义块：最好的单台本地引擎 56 处出问题 → 本地四路 + 融合 20 处 →
-    再挂上术语库 18 处 → 我们的云端生产线不到 10 处，而且那些残留都留了痕、都能由人工复核改掉。
+    同一条 38 分钟访谈、461 个实质语义块、同一把尺（仓库里的 tools/score.py）：最好的单台本地引擎 95 处出问题 →
+    本地四路 + 融合 + 术语库 54 处，四台一起听错的 48 处是投票救不回的。我们的云端生产线残留更少，而且那些残留都留了痕、都能由人工复核改掉。
     <a href="https://transcribe.solutions" target="_blank" rel="noopener">在线版 →</a>`;
 
   renderScript(r.merged, r.ledger);

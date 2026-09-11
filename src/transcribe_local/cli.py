@@ -101,6 +101,13 @@ def _printer():
         elif kind == "engine_done":
             print(f"P1  {kw['engine']:<6} {kw['chars']:>6} 字  {kw['seconds']}s"
                   + (f"  ⚠️ {kw['bad']} 块跑飞" if kw["bad"] else "") + " " * 12)
+        elif kind == "p1qc":
+            for f in kw["fail"]:
+                print(f"P1  ❌ {f}")
+            for w in kw["warn"]:
+                print(f"P1  ⚠️ {w}")
+            if not kw["fail"] and not kw["warn"]:
+                print("P1  ✅ 质检通过")
         elif kind == "divergence":
             print(f"分歧  实质 {kw['substantive']} 处 + 语气词 {kw['fillers']} 处（已折叠）")
         elif kind == "stage" and kw["name"] == "P3":

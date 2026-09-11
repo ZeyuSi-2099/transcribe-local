@@ -132,30 +132,36 @@ def build(rows_by_engine: dict[str, list[Row]], cfg: dict) -> tuple[str, str, li
         if strip:
             texts = {e: detok(t) for e, t in texts.items()}
 
-        body.append(f"[{ts(k[0])} - {ts(k[1])}] {role}: {texts[ids[0]]}")
-        for e in ids[1:]:
+        # 顶格那一路只是排版占位、不享豁免，所以**这一块谁非空谁顶格**：
+        # 某一路在这一块没给出内容（静音 / 漏识 / 跑飞被弃用）时，不能让空行或占位符当主行 ——
+        # 分歧册的坐标轴建在主行上，空主行会让整块的差异定位失真；占位符「/」还曾漏进过终稿。
+        order = [e for e in ids if texts[e].strip()] or ids[:1]
+        order += [e for e in ids if e not in order]
+
+        body.append(f"[{ts(k[0])} - {ts(k[1])}] {role}: {texts[order[0]]}")
+        for e in order[1:]:
             body.append(" " * 18 + f"[{TAG.get(e, e)}] {texts[e] or '/'}")
         body.append("")
 
-        pivot = norm(texts[ids[0]])
-        others = {e: norm(texts[e]) for e in ids[1:]}
+        pivot = norm(texts[order[0]])
+        others = {e: norm(texts[e]) for e in order[1:]}
         if not pivot and not any(others.values()):
             continue
         sp = _spans(pivot, list(others.values()))
         if not sp:
             continue
-        mps = {e: _idxmap(pivot, others[e]) for e in ids[1:]}
+        mps = {e: _idxmap(pivot, others[e]) for e in order[1:]}
 
         sub: list[list[tuple[str, str]]] = []
         fill = 0
         for a, b in sp:
-            raw = [pivot[a:b]] + [_cut(others[e], mps[e], a, b) for e in ids[1:]]
+            raw = [pivot[a:b]] + [_cut(others[e], mps[e], a, b) for e in order[1:]]
             if len(set(raw)) == 1:
                 continue
             if len({bone(v, fillers) for v in raw}) == 1:    # 剥掉语气词后骨架相同 = 不影响意思
                 fill += 1
             else:
-                sub.append([(TAG.get(e, e), v) for e, v in zip(ids, raw)])
+                sub.append([(TAG.get(e, e), v) for e, v in zip(order, raw)])
 
         if not sub and not fill:
             continue

@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -76,16 +75,76 @@ def build(engine_id: str, num_threads: int = 2):
     raise ValueError(f"未知引擎：{engine_id}")
 
 
-# 重试时把块的窗口往外挪一点点。
-# ⚠️ **原样重跑是没用的** —— sherpa-onnx 的离线解码是贪心的，同一段音频喂进去逐字相同。
-#   2026-09-11 实测：FireRed 在同一块上连跑三遍，输出长度都是 122、一个字不差。
-#   这之前代码里写着「AED 系不确定，重跑大概率就好了」，那个假设是错的，白烧两遍 CPU。
-# 真正能翻结果的是**块边界**：我们量过 0.5 ms 的抖动就能翻掉十几块的结果。
-# 一律**往外扩、不往里切**：往里切会丢掉音频，踩「内容不能丢」这条红线；
-#   往外扩最多把邻块的半个字重收一次 —— 宁可重一个字，不可丢一个字。
-# 扩多少不是越大越好（同一块上 +120 ms 反而又跑飞了），所以这是一张实测出来的梯子，
-#   不是一个能往上调的系数。改它请重新实测。
-NUDGE = [(0.0, 0.0), (-0.05, 0.05), (-0.05, 0.0), (-0.15, 0.15)]
+# ── 复读（Doom Loop）检测：字符法 + 词法两道都跑，任一命中即判 ─────────────────────
+# 搬自生产线 Gemini 适配器（Workflow/engines/gemini.py::find_repetition_loop），阈值 10 是
+# 113 份产物上定的线。两道并存是因为各自只在一半语种上有效：字符法覆盖无空格分词的中日
+# （「嗯嗯嗯…」「可能可能可能…」），词法覆盖有空格的语种（芬兰语 `Vihollinen! ` ×71 字符法
+# 一次都抓不到，2026-08-26 事故）。本地版现在只跑中文，词法先带着 —— 英文 profile 迟早要用。
+REPEAT_MIN_REPS = 10
+
+
+def _find_char_loop(text: str, min_reps: int):
+    """长度 1–6 的短串连续重复 ≥ min_reps 次。返回 (重复串, 次数) 或 None。"""
+    n = len(text)
+    if n < min_reps:
+        return None
+    for plen in (1, 2, 3, 4, 5, 6):
+        i = 0
+        while i + plen <= n:
+            phrase = text[i:i + plen]
+            if not phrase.strip():
+                i += 1
+                continue
+            reps, pos = 1, i + plen
+            while text[pos:pos + plen] == phrase:
+                reps += 1
+                pos += plen
+            if reps >= min_reps:
+                return (phrase, reps)
+            i = pos if reps > 1 else i + 1
+    return None
+
+
+def _find_word_loop(text: str, min_reps: int):
+    """按空格切词，同一个词 / 同一组 2–3 词短语连续重复 ≥ min_reps 次。"""
+    toks = text.split()
+    if len(toks) < min_reps:
+        return None
+    for plen in (1, 2, 3):
+        i = 0
+        while i + plen <= len(toks):
+            phrase = toks[i:i + plen]
+            reps, pos = 1, i + plen
+            while toks[pos:pos + plen] == phrase:
+                reps += 1
+                pos += plen
+            if reps >= min_reps:
+                return (" ".join(phrase), reps)
+            i = pos if reps > 1 else i + 1
+    return None
+
+
+def find_repetition_loop(text: str, min_reps: int = REPEAT_MIN_REPS):
+    """这一块的文本有没有跑飞。返回 (重复串, 次数) 或 None。"""
+    for finder in (_find_char_loop, _find_word_loop):
+        hit = finder(text, min_reps)
+        if hit:
+            return hit
+    return None
+
+
+# ── 重试梯子 ────────────────────────────────────────────────────────────────────
+# ⚠️ **原样重跑是没用的** —— sherpa-onnx 的离线解码是贪心的，同一段音频喂进去逐字相同
+#   （2026-09-11 实测：FireRed 同一块连跑三遍，输出长度都是 122、一个字不差）。
+# 本地引擎也没有「随机性」可调，所以打断循环只剩两样：**挪块的起止点**、**切半各听一遍**。
+#   · 挪：只往外扩、不往里切（往里切会丢音频，踩「内容不能丢」）；扩多少不是越大越好
+#     （同一块 +120 ms 反而又跑飞了），两档是实测出来的，改它请重新实测。
+#   · 切半：在块中点 ±2 秒内最安静的一刻下刀，两半各解一次再拼回来 —— 这是生产线 Gemini
+#     适配器的招（那边给主轨用；参考轨已关掉，因为「跑不出来就少一路，远好过整单多等几小时」）。
+# 一共最多 3 次（Duner 2026-09-11 定：次数别太多）。三次都不行 → **这一路这一块弃用**：
+#   文本置空（分歧册显示 ∅、P3 输入不带这一路、坐标轴换到下一路），原文留在 qc_warnings.json 里。
+#   不是丢内容 —— 另外三路对同一块有自己的版本，融合本来就能救；喂一路复读的毒进去才是害。
+LADDER = [("nudge", -0.05, 0.05), ("nudge", -0.15, 0.15), ("split", 0.0, 0.0)]
 
 
 def _decode(rec, x: np.ndarray, a: float, b: float) -> str:
@@ -95,17 +154,43 @@ def _decode(rec, x: np.ndarray, a: float, b: float) -> str:
     return st.result.text.strip()
 
 
-def _runaway(text: str, threshold: int) -> bool:
-    """同一字符连续重复到阈值 = 解码跑飞了。实测见过把「嗯」复读 99 次、吞掉三个语义块。"""
-    return bool(re.search(rf"(.)\1{{{threshold - 1},}}", text))
+def _quietest(x: np.ndarray, t: float, window: float = 2.0, probe: float = 0.2) -> float:
+    """在 t ± window 内找能量最低的 probe 秒，返回它的中点（与 diarize._quietest 同一算法）。"""
+    lo, hi = max(0.0, t - window), min(len(x) / SR, t + window)
+    if hi - lo < probe:
+        return t
+    step, half = 0.02, probe / 2
+    best, best_e = t, float("inf")
+    p = lo + half
+    while p <= hi - half:
+        seg = x[int((p - half) * SR):int((p + half) * SR)]
+        e = float(np.mean(np.abs(seg))) if len(seg) else float("inf")
+        if e < best_e:
+            best_e, best = e, p
+        p += step
+    return best
+
+
+def _attempt(rec, x: np.ndarray, blk: Block, step: tuple, span: float) -> str:
+    kind, ds, de = step
+    a, b = max(0.0, blk.start + ds), min(span, blk.end + de)
+    if kind == "split":
+        if b - a < 3.0:                                       # 太短的块切不开，这一档等于跳过
+            return _decode(rec, x, a, b)
+        mid = _quietest(x, (a + b) / 2, window=min(2.0, (b - a) / 4))
+        left, right = _decode(rec, x, a, mid), _decode(rec, x, mid, b)
+        return (left + right).strip()
+    return _decode(rec, x, a, b)
 
 
 def _qc(text: str, blk: Block, engine_id: str, cb: dict) -> str | None:
     """这一块这一路有没有跑飞。没问题返回 None。"""
     if engine_id not in NONDETERMINISTIC:
         return None                                  # CTC 系逐帧对齐，没这个毛病
-    if cb.get("repeat_detect") and _runaway(text, int(cb.get("repeat_threshold", 10))):
-        return "复读"
+    if cb.get("repeat_detect"):
+        hit = find_repetition_loop(text, int(cb.get("repeat_threshold", REPEAT_MIN_REPS)))
+        if hit:
+            return f"复读「{hit[0]}」×{hit[1]}"
     if cb.get("empty_block_retry") and not text and (blk.end - blk.start) >= 2.0:
         return "空块"
     return None
@@ -113,32 +198,39 @@ def _qc(text: str, blk: Block, engine_id: str, cb: dict) -> str | None:
 
 def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
                on_block=None) -> tuple[list[Row], list[dict]]:
-    """返回（逐块结果, 重试用尽仍未消除的坏块）。
+    """返回（逐块结果, 重试用尽被弃用的块）。
 
-    ⚠️ 坏块**不改写、不丢弃**，原样留在输出里 —— 改写等于把问题藏起来，
-    而另外三路对同一块有自己的版本，融合那一步本来就能把它救回来。
-    但必须喊出来：静默接受坏块会踩「内容不能丢」这条红线。
+    弃用 = 这一路这一块文本置空。原文（每一次尝试的输出）都记在返回的坏块清单里，
+    不删、不改写；只是不再当作一票喂给融合。必须喊出来：静默才是踩红线的那一种。
     """
     eng = cfg["engines"]
     cb = eng.get("circuit_breaker", {})
-    retry = int(cb.get("max_retry", 2))
+    retry = min(int(cb.get("max_retry", len(LADDER))), len(LADDER))
     rec = build(engine_id, int(eng.get("num_threads", 2)))
     rows: list[Row] = []
     bad: list[dict] = []
     tag = TAG.get(engine_id, engine_id)
     span = len(x) / SR
     for i, blk in enumerate(blocks):
-        text, why = "", None
-        for k in range(retry + 1):                   # 第 0 次是原样，之后每次换一档窗口
-            ds, de = NUDGE[min(k, len(NUDGE) - 1)]
-            text = _decode(rec, x, max(0.0, blk.start + ds), min(span, blk.end + de))
-            why = _qc(text, blk, engine_id, cb)
+        text = _decode(rec, x, blk.start, blk.end)
+        why = _qc(text, blk, engine_id, cb)
+        tries = [dict(step="原样", why=why, text=text)]
+        for step in LADDER[:retry]:
             if not why:
                 break
+            text = _attempt(rec, x, blk, step, span)
+            why = _qc(text, blk, engine_id, cb)
+            tries.append(dict(step=step[0] + (f"{step[1]:+.2f}/{step[2]:+.2f}" if step[0] == "nudge" else ""),
+                              why=why, text=text))
         if why:
-            bad.append(dict(block=i + 1, at=round(blk.start, 1), engine=tag, why=why, text=text[:60]))
-            print(f"⚠️ {tag} 第 {i + 1} 块 [{ts(blk.start)}] {why}，重试 {retry} 次仍未消除。"
-                  f"该块这一路不可信，交给融合时请留意。")
+            bad.append(dict(block=i + 1, at=round(blk.start, 1), engine=tag, why=why,
+                            attempts=len(tries) - 1, raw=tries[0]["text"], tries=tries))
+            print(f"⚠️ {tag} 第 {i + 1} 块 [{ts(blk.start)}] {why}，重试 {len(tries) - 1} 次仍未消除。"
+                  f"这一路这一块弃用（原文在 qc_warnings.json），交给另外几路。")
+            text = ""
+        elif len(tries) > 1:
+            print(f"ℹ️ {tag} 第 {i + 1} 块 [{ts(blk.start)}] {tries[0]['why']}，第 {len(tries) - 1} 次重试"
+                  f"（{tries[-1]['step']}）救回。")
         rows.append(Row(blk.start, blk.end, blk.speaker, text))
         if on_block:
             on_block(i + 1, len(blocks))
