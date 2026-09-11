@@ -28,6 +28,18 @@ ROUTE = {
 # CTC 系逐帧对齐，跑十次同一份稿子。
 NONDETERMINISTIC = {"firered_asr2", "qwen3_asr"}
 
+# 单台跑起来的峰值常驻内存（MB），用来算能同时跑几台。
+# [未验证] 现在取的是这台引擎权重文件的字节数。onnxruntime 多半把权重 mmap 进来，
+# 真实常驻会低于这个数 —— 所以它是个**上界**，拿它当分母偏保守，宁可少跑一台。
+# 发布前要逐台实测峰值（ru_maxrss）替换掉，届时改标 [定档]。
+PEAK_MB = {
+    "firered_asr2": 1235,
+    "zipformer_ctc": 367,
+    "paraformer_2023": 243,
+    "qwen3_asr": 983,
+    "seaco_paraformer": 953,
+}
+
 TAG = {
     "firered_asr2": "FRED2",
     "zipformer_ctc": "ZIPC",

@@ -149,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, f.read_bytes(), ctype)
 
     def _api_get(self, route: str, q: dict) -> None:
-        from . import audio, config, models
+        from . import audio, config, mem, models
 
         if route == "state":
             cfg = self.cfg
@@ -165,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
                        "key_env": cfg["p3"].get("api_key_env", ""),
                        "local": cfg["p3"]["base_url"].startswith(("http://127.0.0.1", "http://localhost"))},
                 "terms": cfg["terms"].get("files") or [],
+                "mem": dict(zip(("parallel", "why"), mem.plan(cfg, cfg["engines"]["enabled"])),
+                            total_mb=mem.total_mb(), available_mb=mem.available_mb(),
+                            setting=cfg["engines"].get("parallel", "auto")),
                 "jobs": [{"id": j.id, "state": j.state, "stem": j.audio.stem} for j in JOBS.values()],
             })
 

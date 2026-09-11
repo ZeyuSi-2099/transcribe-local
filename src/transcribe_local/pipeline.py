@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,7 +34,7 @@ class Result:
 
 def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) -> Result:
     """跑完整条链。emit(kind, **kw) 是进度回调，kind 见下面各处调用。"""
-    from . import audio as au, diarize, divergence, engines, export, fuse
+    from . import audio as au, diarize, divergence, engines, export, fuse, mem
 
     say = emit or (lambda *a, **k: None)
     out.mkdir(parents=True, exist_ok=True)
@@ -53,18 +54,42 @@ def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) 
     r.segments, r.blocks = len(segs), len(blocks)
     say("chop", segments=r.segments, blocks=r.blocks, seconds=round(time.time() - t0))
 
-    rows = {}
-    for e in cfg["engines"]["enabled"]:
+    enabled = list(cfg["engines"]["enabled"])
+    n_par, why = mem.plan(cfg, enabled)
+    say("parallel", n=n_par, total=len(enabled), why=why)
+
+    # 开跑前拿「现在还剩多少」示警。不拿它定并行数 —— 那个数按总内存算，
+    # 否则同一台机器今天跑三台明天跑一台，成绩不可比。
+    need = n_par * max(engines.PEAK_MB.get(e, 1200) for e in enabled)
+    free = mem.available_mb()
+    if free and free < need:
+        say("mem_warn", need=need, free=free, n=n_par)
+
+    def _one(e: str):
         tag = engines.TAG.get(e, e)
         t = time.time()
         say("engine_start", engine=tag, route=engines.ROUTE.get(e, ""), blocks=r.blocks)
-        rows[e], bad = engines.transcribe(
+        row, bad = engines.transcribe(
             e, x, blocks, cfg,
             on_block=lambda i, n, _t=tag: say("engine_block", engine=_t, done=i, total=n))
-        (out / "work" / f"p1_{tag}.md").write_text(engines.dump(rows[e]), encoding="utf-8")
-        r.engines[tag] = sum(len(row.text) for row in rows[e])
+        (out / "work" / f"p1_{tag}.md").write_text(engines.dump(row), encoding="utf-8")
+        say("engine_done", engine=tag, chars=sum(len(q.text) for q in row),
+            seconds=round(time.time() - t), bad=len(bad))
+        return e, row, bad
+
+    # 每台引擎在 transcribe() 里自己 build 一个识别器，互不共享状态，所以可以并行。
+    # 音频那个大数组 x 是只读共享的，不会按路复制。
+    if n_par <= 1:
+        finished = [_one(e) for e in enabled]
+    else:
+        with ThreadPoolExecutor(max_workers=n_par) as pool:
+            finished = list(pool.map(_one, enabled))   # map 按入参顺序返回，顺序不会乱
+
+    rows = {}
+    for e, row, bad in finished:                       # 必须还原成配置里的顺序
+        rows[e] = row
+        r.engines[engines.TAG.get(e, e)] = sum(len(q.text) for q in row)
         r.qc += bad
-        say("engine_done", engine=tag, chars=r.engines[tag], seconds=round(time.time() - t), bad=len(bad))
 
     if r.qc:
         (out / "work" / "qc_warnings.json").write_text(

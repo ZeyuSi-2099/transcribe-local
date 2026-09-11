@@ -280,8 +280,9 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
   <div class="split">
    <div>
     <div class="card">
-      <h3>四路并行</h3>
+      <h3 id="runhead">引擎</h3>
       <div id="lanes"></div>
+      <p class="foot" id="runfoot"></p>
     </div>
     <div id="runtail"></div>
    </div>
@@ -413,7 +414,11 @@ async function boot(){
     `<div class="engrow"><i class="bar"></i><span class="tg">${esc(e.tag)}</span>`
     + `<span class="rt">${esc(e.route)}</span></div>`).join('');
 
-  const p3 = STATE.p3;
+  // 配置文件里挂了术语库就填进框里。不填的话界面会把空数组发过去，
+  // 等于把 config.yaml 里挂好的库悄悄清掉 —— 而界面上根本看不出来。
+  if (STATE.terms && STATE.terms.length) $('#terms').value = STATE.terms.join(',');
+
+  const p3 = STATE.p3, M = STATE.mem || {parallel: 1, why: ''};
   const miss = STATE.models.filter(m => !m.installed);
   const missMb = miss.reduce((a, m) => a + m.size_mb, 0);
   $('#envbox').innerHTML = [
@@ -421,6 +426,7 @@ async function boot(){
     ['ffmpeg', STATE.ffmpeg ? chip('ok', '有') : chip('warn', '没装')],
     ['融合后端', `<span class="mono" style="font-size:12px">${esc(p3.model || '')}</span> `
                  + (p3.reachable ? chip('ok', '通') : chip('warn', '连不上'))],
+    ['同时跑几路', `<span class="mono" style="font-size:12px">${M.parallel} / ${STATE.engines.length}</span>`],
   ].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span>${v}</span></div>`).join('');
 
   // 只有真出问题时才占版面 —— 一切正常的时候右栏不该有一堆黄框
@@ -431,6 +437,7 @@ async function boot(){
       : `检查 <span class="mono">${esc(p3.key_env || '')}</span> 这个环境变量设了没有`)
       + '，或者用「不融合」预设先出分歧册');
   if (tips.length) $('#envbox').innerHTML += `<p class="foot">· ${tips.join('<br>· ')}</p>`;
+  $('#envbox').innerHTML += `<p class="foot">${esc(M.why || '')}</p>`;
 
   const host = (p3.base_url || '').replace(/^https?:\/\//, '').split('/')[0];
   $('#privacy').innerHTML = '<h3>数据去哪</h3>' + (p3.local
@@ -498,7 +505,7 @@ function startRun(preset){
     <div class="lane" data-tag="${e.tag}">
       <div class="nm"><i class="bar"></i>${e.tag}</div>
       <div class="track"><i></i></div>
-      <div class="st">等切块</div>
+      <div class="st">排队</div>
     </div>`).join('');
   show('run');
 
@@ -520,6 +527,18 @@ function stage(k, v){
 function onEvent(d){
   const lane = t => $(`#lanes .lane[data-tag="${t}"]`);
   switch (d.kind){
+    case 'parallel':
+      $('#runhead').textContent = d.n > 1 ? `${d.total} 台引擎 · 同时跑 ${d.n} 台` : `${d.total} 台引擎 · 一台跑完换下一台`;
+      $('#runfoot').innerHTML = esc(d.why) + (d.n > 1
+        ? '<br>同时跑的那几台会一起推进，剩下的排队等空位。'
+        : '<br>这台机器只够逐台跑。<b>FRED2 是自回归、一个字一个字吐，它最慢</b>，后面几台快得多。');
+      break;
+    case 'mem_warn':
+      $('#runtail').innerHTML += `<div class="note"><b>内存可能不够。</b>
+        按 ${d.n} 路算要 ${d.need} M，开跑时只剩 ${d.free} M —— 照跑，但换页会让它更慢。
+        下次可以在 <span class="mono">config.yaml</span> 里把 <span class="mono">engines.parallel</span> 调小。</div>`;
+      break;
+    case 'engine_start': { const L = lane(d.engine); if (L) L.querySelector('.st').textContent = '跑着…'; break; }
     case 'audio':     stage('P0', `音频 ${d.minutes} 分钟`); break;
     case 'chop':      stage('', `声纹 ${d.segments} 段 → 切块 <b>${d.blocks}</b> 块（${d.seconds}s）`); break;
     case 'engine_block': {
