@@ -92,6 +92,7 @@
 尚未发布。
 
 **融合那一步默认接 API**（`deepseek-flash` + `reasoning_effort: high`，一份 38 分钟访谈几毛钱、约 40 分钟），
+这一档不是随手挑的 —— 它就是我们自己那条云端生产线走 DeepSeek 时用的同一个模型、同一组参数，
 所以你不必为了跑通它先下一个几 G 的大模型。想全程离线就把 `base_url` 指到本机的
 Ollama / LM Studio / mlx_lm.server / llama-server —— 同一条代码路径，再加约 4.5 GB 权重。
 

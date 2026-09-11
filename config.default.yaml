@@ -141,7 +141,11 @@ p3:
   #          或 http://127.0.0.1:11435/v1（mlx_lm.server / LM Studio / llama-server）
   # ─────────────────────────────────────────────────────────────
   base_url: https://api.deepseek.com/v1
-  model: deepseek-flash                    # 便宜那档；更强的是 deepseek-v4-pro（贵约 3 倍）
+  model: deepseek-flash                    # [定档] 我们自己的云端生产线落到 DeepSeek 时，用的就是这一档。
+                                           #   deepseek-v4-flash 是同一个名字的别名，服务端解析成 deepseek-flash。
+                                           #   还有更贵的 deepseek-v4-pro，别默认选它 —— 2026-08 我们逐处人工核听，
+                                           #   14 处真差异它错了 13 处：毛病是该拍板的时候不拍板、照抄主引擎，
+                                           #   钱大半花在「想」上，想完反而更保守。机器指标上两档打平。
                                            # 界面「设置」页可以直接切，不用手改这个文件
   api_key_env: DEEPSEEK_API_KEY            # 只从环境变量读。⛔ 永不写进配置文件、永不进日志
                                            #    换别家就改这三行，例如 OpenAI：

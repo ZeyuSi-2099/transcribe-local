@@ -35,3 +35,6 @@ config.yaml
 
 # macOS
 .DS_Store
+
+# 本机跑验收时的工作目录
+.run/

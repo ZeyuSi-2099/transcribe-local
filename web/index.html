@@ -58,13 +58,38 @@ nav .spacer{flex:1}
 .themebtn{background:none;border:0;color:var(--inkGhost);font-size:11.5px;cursor:pointer;padding:10px 18px 0;text-align:left}
 
 /* ── 主区 ── */
-main{flex:1;min-width:0;overflow-y:auto;padding:34px 40px 80px}
-.wrap{max-width:880px}
+main{flex:1;min-width:0;overflow-y:auto;padding:34px 44px 80px}
+.wrap{max-width:1140px;margin-inline:auto}
 h1{font-size:24px;font-weight:600;letter-spacing:-.3px;margin:0 0 6px}
 .sub{color:var(--inkFaint);font-size:13.5px;margin:0 0 26px;max-width:62ch}
 h2{font-size:15px;font-weight:600;margin:30px 0 10px}
+h3{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--inkFaint);margin:0 0 8px}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .hide{display:none!important}
+
+/* 两栏：左边是要动手的东西，右边是「现在什么情况」。
+   宽屏之前一直是单列靠左，右边整片白 —— 不是留白，是没安排。 */
+.split{display:grid;gap:16px;align-items:start}
+.split>*{min-width:0}
+.rail{display:flex;flex-direction:column;gap:14px}
+.rail .note,.rail .stats{margin:0}
+.rail .stage{display:block;padding:8px 0}
+.rail .stage .k{display:block;width:auto;flex:none;margin-bottom:1px}
+.rail .stage:last-child{border-bottom:0}
+.railcard{background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.foot{font-size:12px;color:var(--inkFaint);line-height:1.65;margin:10px 0 0}
+.foot b{color:var(--ink)}
+.kv{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;
+    border-bottom:1px solid var(--line2);font-size:13px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--inkFaint)}
+/* 引擎条：跟侧栏的四道杠、运行中的四轨是同一个符号 */
+.engrow{display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--line2)}
+.engrow:last-child{border-bottom:0}
+.engrow .bar{width:3px;height:14px;border-radius:2px;background:var(--accent);flex:0 0 auto}
+.engrow:nth-child(2) .bar{opacity:.72}.engrow:nth-child(3) .bar{opacity:.5}.engrow:nth-child(4) .bar{opacity:.32}
+.engrow .tg{font-family:var(--mono);font-size:12.5px;width:56px;flex:0 0 56px}
+.engrow .rt{color:var(--inkFaint);font-size:12.5px}
 
 .card{background:var(--raised);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;margin:0 0 14px}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
@@ -153,6 +178,13 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
 .note.acc{border-left-color:var(--accent);background:var(--accentTint)}
 .note b{color:var(--ink)}
 .empty{color:var(--inkGhost);font-size:13.5px;padding:28px 0}
+@media(min-width:1080px){
+  .split{grid-template-columns:minmax(0,1.8fr) minmax(300px,1fr);gap:22px}
+  .knobcols{display:grid;grid-template-columns:1fr 1fr;column-gap:30px}
+  .knobcols .knob:last-child{border-bottom:1px solid var(--line2)}
+  .opts{display:grid;grid-template-columns:1fr 1fr}
+  #hist{display:grid;grid-template-columns:1fr 1fr;column-gap:14px}
+}
 @media(max-width:760px){
   body{flex-direction:column}
   nav{width:auto;flex:0 0 auto;flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);
@@ -161,6 +193,7 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
   nav button.tab{width:auto;border-left:0;border-bottom:2px solid transparent;padding:6px 12px;white-space:nowrap}
   nav button.tab[aria-current="true"]{border-bottom-color:var(--accent)}
   main{padding:22px 18px 60px}
+  .wrap{max-width:none}
 }
 </style>
 </head>
@@ -189,40 +222,54 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
   <h1>新建转录</h1>
   <p class="sub">音频和模型一步都不出这台机器。浏览器只是界面，识别在本机的 Python 进程里跑。</p>
 
-  <div class="drop" id="drop">
-    <div class="big">把录音拖到这里</div>
-    <div class="hint">或点击选择 · m4a / mp3 / wav / flac / aac / ogg</div>
-    <input type="file" id="file" class="hide" accept="audio/*,.m4a,.mp3,.wav,.flac,.aac,.ogg">
-  </div>
-  <div class="row" style="margin:10px 0 0">
-    <div style="flex:1;min-width:260px">
+  <div class="split">
+   <div>
+    <div class="drop" id="drop">
+      <div class="big">把录音拖到这里</div>
+      <div class="hint">或点击选择 · m4a / mp3 / wav / flac / aac / ogg</div>
+      <input type="file" id="file" class="hide" accept="audio/*,.m4a,.mp3,.wav,.flac,.aac,.ogg">
+    </div>
+    <div style="margin:12px 0 0">
       <label class="f">或者直接给本机路径（大文件不用上传，快）</label>
       <input type="text" id="path" placeholder="~/Downloads/访谈.m4a">
     </div>
-  </div>
 
-  <div class="card" style="margin-top:18px">
-    <div class="row">
-      <div style="flex:1;min-width:210px">
-        <label class="f">预设</label>
-        <select id="preset">
-          <option value="full">标准 —— 四路全开 + 融合</option>
-          <option value="fast">快速 —— 只跑最快的一路，不融合</option>
-          <option value="nofuse">四路但不融合 —— 只出分歧册</option>
-        </select>
-      </div>
-      <div style="flex:1;min-width:210px">
-        <label class="f">术语库（逗号分隔，可空）</label>
-        <input type="text" id="terms" placeholder="terms/zh_我的行业.md">
+    <div class="card" style="margin-top:16px">
+      <div class="row">
+        <div style="flex:1;min-width:200px">
+          <label class="f">预设</label>
+          <select id="preset">
+            <option value="full">标准 —— 四路全开 + 融合</option>
+            <option value="fast">快速 —— 只跑最快的一路，不融合</option>
+            <option value="nofuse">四路但不融合 —— 只出分歧册</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <label class="f">术语库（逗号分隔，可空）</label>
+          <input type="text" id="terms" placeholder="terms/zh_我的行业.md">
+        </div>
       </div>
     </div>
-    <p class="sub" style="margin:12px 0 0" id="engineline"></p>
-  </div>
 
-  <div id="warn-box"></div>
-  <div class="row" style="margin-top:16px">
-    <button class="btn" id="go" disabled>开始</button>
-    <span class="mono" style="font-size:12px;color:var(--inkFaint)" id="picked"></span>
+    <div id="warn-box"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" id="go" disabled>开始</button>
+      <span class="mono" style="font-size:12px;color:var(--inkFaint)" id="picked"></span>
+    </div>
+   </div>
+
+   <aside class="rail">
+     <div class="railcard">
+       <h3>这次会跑</h3>
+       <div id="engineline"></div>
+       <p class="foot">四路是四种不同的识别架构。<b>它们犯的错不一样</b>，后面那步融合才有东西可对。</p>
+     </div>
+     <div class="railcard">
+       <h3>本机状态</h3>
+       <div id="envbox"></div>
+     </div>
+     <div class="railcard" id="privacy"></div>
+   </aside>
   </div>
 </section>
 
@@ -230,24 +277,39 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
 <section class="wrap hide" id="v-run">
   <h1>运行中</h1>
   <p class="sub" id="runsub"></p>
-  <div class="card">
-    <div id="stages"></div>
-    <div id="lanes" style="margin-top:6px"></div>
+  <div class="split">
+   <div>
+    <div class="card">
+      <h3>四路并行</h3>
+      <div id="lanes"></div>
+    </div>
+    <div id="runtail"></div>
+   </div>
+   <aside class="rail">
+     <div class="railcard">
+       <h3>流水账</h3>
+       <div id="stages"></div>
+     </div>
+   </aside>
   </div>
-  <div id="runtail"></div>
 </section>
 
 <!-- ═══ 03 结果 ═══ -->
 <section class="wrap hide" id="v-result">
   <h1>结果</h1>
   <p class="sub" id="ressub"></p>
-  <div class="stats" id="resstats"></div>
-  <div id="resqc"></div>
-  <div class="note acc" id="resquality"></div>
-  <h2>终稿 —— 点带 <span class="mono">[❓]</span> 的那行，看四路各自写了什么</h2>
-  <div class="script" id="script"></div>
-  <h2>导出</h2>
-  <div class="row" id="exports"></div>
+  <div class="split">
+   <div>
+    <h2 style="margin-top:0">终稿 —— 点带 <span class="mono">[❓]</span> 的那行，看四路各自写了什么</h2>
+    <div class="script" id="script"></div>
+   </div>
+   <aside class="rail">
+     <div class="stats" id="resstats"></div>
+     <div id="resqc"></div>
+     <div class="railcard"><h3>导出</h3><div class="row" id="exports"></div></div>
+     <div class="note acc" id="resquality"></div>
+   </aside>
+  </div>
 </section>
 
 <!-- ═══ 04 设置 ═══ -->
@@ -276,28 +338,40 @@ textarea{font-family:var(--mono);font-size:13px;line-height:1.75;min-height:340p
 
   <h2>全部参数</h2>
   <div class="row" id="tally" style="margin-bottom:18px"></div>
-  <div class="card" id="knobs"></div>
+  <div class="card knobcols" id="knobs"></div>
 </section>
 
 <!-- ═══ 05 术语库 ═══ -->
 <section class="wrap hide" id="v-terms">
   <h1>术语库</h1>
-  <p class="sub">一行一条 <span class="mono">- 术语 ｜ 含义</span>，全角竖线。<b>只记正确写法，不要枚举错写形</b> ——
-     库会注入融合提示词、宜短，音近的候选模型自己会锚。</p>
-  <div class="note"><b>实测：挂对了能突破四路投票的天花板</b>（四路全听错的地方，术语库是第四条信息源）。
-     但它<b>只在库里真有那个词时才起作用</b>，而且<b>写错的词形会被模型当权威照着改 —— 写错比不写更坏</b>。新词先查清楚再写。</div>
-  <label class="f">文件路径</label>
-  <input type="text" id="termpath" value="terms/zh_我的行业.md">
-  <label class="f" style="margin-top:12px">内容</label>
-  <textarea id="termtext" spellcheck="false"># 我的术语库
+  <p class="sub">一行一条，全角竖线分隔术语和解释。这个库会注入融合提示词，所以宜短。</p>
+  <div class="split">
+   <div>
+    <label class="f">文件路径</label>
+    <input type="text" id="termpath" value="terms/zh_我的行业.md">
+    <label class="f" style="margin-top:12px">内容</label>
+    <textarea id="termtext" spellcheck="false"># 我的术语库
 
 ## 主题分段
 
 - 术语 ｜ 一句话解释它是什么
 </textarea>
-  <div class="row" style="margin-top:12px">
-    <button class="btn" id="saveterms">保存</button>
-    <span class="mono" style="font-size:12px;color:var(--inkFaint)" id="termmsg"></span>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="saveterms">保存</button>
+      <span class="mono" style="font-size:12px;color:var(--inkFaint)" id="termmsg"></span>
+    </div>
+   </div>
+   <aside class="rail">
+     <div class="railcard">
+       <h3>写法</h3>
+       <div class="kv"><span class="k">一条</span><span class="mono" style="font-size:12px">- 术语 ｜ 含义</span></div>
+       <div class="kv"><span class="k">分段</span><span class="mono" style="font-size:12px">## 主题</span></div>
+       <div class="kv"><span class="k">竖线</span><span class="mono" style="font-size:12px">｜ 全角</span></div>
+       <p class="foot"><b>只记正确写法，不要枚举错写形</b> —— 音近的候选模型自己会锚。</p>
+     </div>
+     <div class="note" style="margin:0"><b>实测：挂对了能突破四路投票的天花板</b>（四路全听错的地方，术语库是第四条信息源）。
+        但它<b>只在库里真有那个词时才起作用</b>，而且<b>写错的词形会被模型当权威照着改 —— 写错比不写更坏</b>。新词先查清楚再写。</div>
+   </aside>
   </div>
 </section>
 
@@ -333,17 +407,36 @@ $('#theme').onclick = () => {
 /* ── 启动：拉状态 ── */
 async function boot(){
   STATE = await (await fetch('/api/state')).json();
-  $('#engineline').textContent = '这次会跑：' +
-    STATE.engines.map(e => `${e.tag}（${e.route}）`).join(' · ');
-  const w = [];
+  const chip = (c, t) => `<span class="chip ${c}">${t}</span>`;
+
+  $('#engineline').innerHTML = STATE.engines.map(e =>
+    `<div class="engrow"><i class="bar"></i><span class="tg">${esc(e.tag)}</span>`
+    + `<span class="rt">${esc(e.route)}</span></div>`).join('');
+
+  const p3 = STATE.p3;
   const miss = STATE.models.filter(m => !m.installed);
-  if (miss.length) w.push(`还缺 ${miss.length} 个模型（${miss.reduce((a,m)=>a+m.size_mb,0)} M）—— 在终端跑 <span class="mono">transcribe-local setup</span>`);
-  if (!STATE.ffmpeg) w.push('没装 ffmpeg —— 只能喂 16 kHz 单声道 .wav');
-  if (!STATE.p3.reachable) w.push(`融合后端连不上（<span class="mono">${esc(STATE.p3.base_url)}</span>）—— `
-    + (STATE.p3.local ? '本机模型记得先起服务' : `检查 <span class="mono">${esc(STATE.p3.key_env || '')}</span> 这个环境变量设了没有`)
-    + '，或者用「不融合」预设先出分歧册');
-  if (!STATE.p3.local) w.push('融合走的是云端 API —— <b>这一步会把转录文本发给对方，音频不会发</b>。要全程离线，把 config.yaml 的 base_url 指到本机服务。');
-  $('#warn-box').innerHTML = w.length ? `<div class="note">${w.map(x=>'· '+x).join('<br>')}</div>` : '';
+  const missMb = miss.reduce((a, m) => a + m.size_mb, 0);
+  $('#envbox').innerHTML = [
+    ['模型', miss.length ? chip('warn', `缺 ${miss.length} 个 · ${missMb} M`) : chip('ok', '全部就位')],
+    ['ffmpeg', STATE.ffmpeg ? chip('ok', '有') : chip('warn', '没装')],
+    ['融合后端', `<span class="mono" style="font-size:12px">${esc(p3.model || '')}</span> `
+                 + (p3.reachable ? chip('ok', '通') : chip('warn', '连不上'))],
+  ].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span>${v}</span></div>`).join('');
+
+  // 只有真出问题时才占版面 —— 一切正常的时候右栏不该有一堆黄框
+  const tips = [];
+  if (miss.length) tips.push('模型没齐 —— 在终端跑 <span class="mono">transcribe-local setup</span>');
+  if (!STATE.ffmpeg) tips.push('没装 ffmpeg —— 只能喂 16 kHz 单声道 .wav');
+  if (!p3.reachable) tips.push((p3.local ? '本机模型记得先起服务'
+      : `检查 <span class="mono">${esc(p3.key_env || '')}</span> 这个环境变量设了没有`)
+      + '，或者用「不融合」预设先出分歧册');
+  if (tips.length) $('#envbox').innerHTML += `<p class="foot">· ${tips.join('<br>· ')}</p>`;
+
+  const host = (p3.base_url || '').replace(/^https?:\/\//, '').split('/')[0];
+  $('#privacy').innerHTML = '<h3>数据去哪</h3>' + (p3.local
+    ? '<p class="foot" style="margin:0">音频、模型、融合定字全在这台机器上跑，<b>一个字节都不出去</b>。</p>'
+    : `<p class="foot" style="margin:0">音频不出本机。<b>只有最后定字那步会把转录文本发给 `
+      + `<span class="mono">${esc(host)}</span>，音频不发。</b>要全程离线，去「设置」把融合后端换成本机模型。</p>`);
 }
 
 /* ── 选文件 ── */
