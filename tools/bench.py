@@ -94,6 +94,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=None, help="终稿落盘目录（默认 工作目录/bench）")
     ap.add_argument("--blocks", default=None, metavar="a-b",
                     help="只取第 a 到 b 块（含），做定点 A/B 用；打分也只算这段时间内的金标块")
+    ap.add_argument("--candidates", nargs="*", type=Path, default=None,
+                    help="候选引擎的 p1_<TAG>.md（tools/try_engine.py 的产物）：报单台成绩，以及加进来后「全错」还剩几块")
     a = ap.parse_args()
 
     cfg = config.load(a.config)
@@ -128,6 +130,22 @@ def main() -> None:
     print("\n单台（算问题）： " + "  ".join(f"{t} {len(s)}" for t, s in single.items())
           + f"   ｜ 四路全错（天花板）{len(ceiling)}")
     top = TAG[enabled[0]]
+
+    if a.candidates:
+        print("\n候选引擎（单台 · 与现有四路一起错的块数 · 四路 + 它 = 五路全错）")
+        for cp in a.candidates:
+            got = {}
+            for ln in cp.read_text(encoding="utf-8").splitlines():
+                m = P1_LINE.match(ln)
+                if m:
+                    got[(m[1], m[2])] = m[4]
+            crow = [Row(b[0], b[1], b[2], got.get((ts(b[0]), ts(b[1])), "")) for b in blocks]
+            cb = bad_units(gold, route_text(crow), tb, strict=False)
+            five = ceiling & cb
+            best_pair = min(((t, len(s & cb)) for t, s in single.items()), key=lambda x: x[1])
+            print(f"  {cp.stem.replace('p1_', ''):8s} 单台 {len(cb):3d} ｜ 五路全错 {len(five):3d}（四路 {len(ceiling)}）"
+                  f" ｜ 与最不重合的那台（{best_pair[0]}）同时错 {best_pair[1]}")
+        return
 
     p3in, ledger, found = divergence.build(rows, cfg)
     out = a.out or (a.work / "bench")

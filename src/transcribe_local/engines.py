@@ -21,11 +21,17 @@ ROUTE = {
     "paraformer_2023": "非自回归",
     "qwen3_asr": "LLM 式",
     "seaco_paraformer": "非自回归 + 热词",
+    # ── 候选池（模块 2 盘点，2026-09-12）：只在 tools/try_engine.py 里跑横评，不在默认清单里 ──
+    "funasr_nano": "LLM 式",
+    "sense_voice": "非自回归",
+    "sense_voice_nano": "非自回归",
+    "cohere_transcribe": "AED 自回归",
+    "omnilingual_ctc": "CTC 逐帧",
 }
 
-# AED 系自回归解码，跑两次不是同一份稿子，会复读也会吐空 —— 必须配熔断器。
-# CTC 系逐帧对齐，跑十次同一份稿子。
-NONDETERMINISTIC = {"firered_asr2", "qwen3_asr"}
+# AED / LLM 式自回归解码，跑两次不是同一份稿子，会复读也会吐空 —— 必须配熔断器。
+# CTC / 非自回归逐帧对齐，跑十次同一份稿子。
+NONDETERMINISTIC = {"firered_asr2", "qwen3_asr", "funasr_nano", "cohere_transcribe"}
 
 # 单台跑起来的峰值常驻内存（MB），用来算能同时跑几台。
 # [未验证] 现在取的是这台引擎权重文件的字节数。onnxruntime 多半把权重 mmap 进来，
@@ -45,6 +51,11 @@ TAG = {
     "paraformer_2023": "PARA",
     "qwen3_asr": "QWEN3",
     "seaco_paraformer": "SEACO",
+    "funasr_nano": "FNANO",
+    "sense_voice": "SENSE",
+    "sense_voice_nano": "SVNANO",
+    "cohere_transcribe": "COHERE",
+    "omnilingual_ctc": "OMNI",
 }
 
 
@@ -197,7 +208,7 @@ def _qc(text: str, blk: Block, engine_id: str, cb: dict) -> str | None:
 
 
 def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
-               on_block=None) -> tuple[list[Row], list[dict]]:
+               on_block=None, rec=None) -> tuple[list[Row], list[dict]]:
     """返回（逐块结果, 重试用尽被弃用的块）。
 
     弃用 = 这一路这一块文本置空。原文（每一次尝试的输出）都记在返回的坏块清单里，
@@ -206,7 +217,7 @@ def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
     eng = cfg["engines"]
     cb = eng.get("circuit_breaker", {})
     retry = min(int(cb.get("max_retry", len(LADDER))), len(LADDER))
-    rec = build(engine_id, int(eng.get("num_threads", 2)))
+    rec = rec or build(engine_id, int(eng.get("num_threads", 2)))     # 横评时可以传一个自己建的识别器进来
     rows: list[Row] = []
     bad: list[dict] = []
     tag = TAG.get(engine_id, engine_id)
