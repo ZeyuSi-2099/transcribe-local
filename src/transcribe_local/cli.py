@@ -195,14 +195,15 @@ def _models(a) -> int:
     from . import models
     mf = models.manifest()
     if a.action == "list":
-        print(f"{'模型':<26}{'角色':<22}{'体积':>8}  {'许可':<10}{'状态'}")
+        print(f"{'模型':<26}{'角色':<22}{'下载':>7}  {'许可':<12}{'状态'}")
         for e in mf.values():
-            print(f"{e.id:<26}{e.role:<22}{e.size_mb:>6} M  {e.license:<10}"
+            print(f"{e.id:<26}{e.role:<22}{e.size_mb:>5} M  {e.license:<12}"
                   f"{'已装' if models.installed(e.id) else '未装'}")
         miss, mb = models.plan([e.id for e in mf.values() if e.enabled_by_default])
         print(f"\n缓存目录：{models.cache_dir()}")
         print(f"还缺 {len(miss)} 个、合计 {mb} M" if miss else "默认要用的都装好了")
-        print("⚠️ 许可一栏尚未逐个核实 —— 模型权重的条款与本仓库的许可是两回事。")
+        print("⚠️ 模型权重的许可与本仓库的 BSL 是两回事，用户要遵守的是模型方那一份。")
+        print("   逐条来源见 models/manifest.toml 的 license_src 字段；上游可能改许可，升版本请重查。")
         return 0
 
     if a.minimal and not a.ids:

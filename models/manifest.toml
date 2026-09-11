@@ -2,13 +2,18 @@
 #
 # ⛔ 本仓库不重分发任何模型权重。下载器只按下面的地址从各自官方源拉，并校验 SHA256。
 #
-# ⚠️ license 字段目前全部是 "未核实"。发布前必须逐个查清并填上真实条款 ——
+# license：默认四路 + 声纹 + VAD 共 7 个已逐个查清（2026-09-11），来源记在 license_src 里。
 #    这些权重的许可跟本仓库的 BSL 是两回事，用户要遵守的是模型方那一份。
 #    已知反例：Reverb-v2 明确禁止商用（我们测过并否决了），说明这类条款真实存在。
+#    ⚠️ 上游可能改许可。换模型、升版本时重新查，别沿用这里的结论。
 #
-# sha256 字段同样待填：下载器在校验和为空时会拒绝校验并打印实际值，
-# 便于第一次填表；发布前必须补齐，否则下载没有完整性保证。
+# sha256：已按下面的办法填好 —— 没有下 2.8 G 重来一遍，而是拿本机缓存的同名包，
+#    先用 HEAD 比对源文件的精确字节数，再用 Range 抽查头/中/尾各 1 MB 与源逐字节比对，
+#    三段加精确大小都一致后才对本地文件算哈希。对「防下载损坏」这个用途足够；
+#    它不是供应链签名，真实性由 HTTPS + GitHub Release 保证。
 
+# size_mb = **下载体积**（压缩包字节数，实测自源站），不是解压后占盘大小。
+# 首启向导报的「合计要下多少」用的就是它，所以这里必须是下载体积。
 schema = 1
 
 # ─── 声纹 ───────────────────────────────────────────────
@@ -18,9 +23,10 @@ role     = "diarize.segmentation"
 size_mb  = 7
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
 archive  = "tar.bz2"
-sha256   = ""
-license  = "未核实"
+sha256   = "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488"
+license  = "MIT"
 note     = "sherpa-onnx 转换版。官方 pyannote 权重需 HF 授权，条款要单独看"
+license_src = "包内自带 LICENSE：MIT，Copyright (c) 2022 CNRS"
 
 [[model]]
 id       = "campplus-zh"
@@ -28,42 +34,47 @@ role     = "diarize.embedding"
 size_mb  = 28
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
 archive  = "none"
-sha256   = ""
-license  = "未核实"
+sha256   = "f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11"
+license  = "Apache-2.0"
 note     = "阿里 3D-Speaker。全长人工核听 4:2 胜 ERes2Net-200k，且快 2.3 倍、小 8 倍"
+license_src = "modelscope/3D-Speaker 仓库 LICENSE = Apache-2.0"
 
 [[model]]
 id       = "silero_vad"
 role     = "vad"
-size_mb  = 2
+size_mb  = 1
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
 archive  = "none"
-sha256   = ""
-license  = "未核实"
+sha256   = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+license  = "MIT"
 note     = "补漏用。没有它声纹分段会漏 215 个真字，有它只漏 4 个"
 
 # ─── Phase 1 · 四路 ASR ──────────────────────────────────
+license_src = "snakers4/silero-vad 仓库 LICENSE = MIT，Copyright Silero Team"
+
 [[model]]
 id       = "firered_asr2"
 role     = "asr"
 route    = "AED 自回归"
-size_mb  = 1200
+size_mb  = 839
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2"
 archive  = "tar.bz2"
-sha256   = ""
-license  = "未核实"
+sha256   = "43015b3f1643a5688b4821e8ed323473d38b798c4ec291471fe00df1bcfc4f1c"
+license  = "Apache-2.0"
 note     = "小红书。单台成绩最好（56）、术语活得最多。zh_en 双语，英文 profile 可直接复用"
+license_src = "FireRedTeam/FireRedASR 仓库 LICENSE = Apache-2.0（小红书）"
 
 [[model]]
 id       = "zipformer_ctc"
 role     = "asr"
 route    = "CTC 逐帧"
-size_mb  = 351
+size_mb  = 301
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03.tar.bz2"
 archive  = "tar.bz2"
-sha256   = ""
-license  = "未核实"
+sha256   = "f3ad1814fea34c407eab0cc3df6f6b625419ac9a60d8aebd8efe772a8e85ef67"
+license  = "Apache-2.0"
 note     = "next-gen Kaldi / k2。58。体积小，跑十次同一份稿子"
+license_src = "k2-fsa/icefall 仓库 LICENSE = Apache-2.0"
 
 [[model]]
 id       = "paraformer_2023"
@@ -72,28 +83,34 @@ route    = "非自回归"
 size_mb  = 234
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2023-09-14.tar.bz2"
 archive  = "tar.bz2"
-sha256   = ""
-license  = "未核实"
+sha256   = "9c49fd9c6fb63de8e18c1054cf3d100f804741b7e608e187923cd8ff09fa9f03"
+license  = "Apache-2.0"
 note     = "阿里 FunASR。63。最小、最快（全片 54 秒）"
+license_src = "funasr/paraformer-zh 模型页标 apache-2.0。⚠️ FunASR 旗下并非全部模型同一许可（另有标 model-license 的），换 FunASR 别的模型要重新查"
 
 [[model]]
 id       = "qwen3_asr"
 role     = "asr"
 route    = "LLM 式"
-size_mb  = 954
+size_mb  = 879
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2"
 archive  = "tar.bz2"
-sha256   = ""
-license  = "未核实"
+sha256   = "393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96"
+license  = "Apache-2.0"
 note     = "阿里。67。理解力好、不出胡话、自带标点"
 
 # ─── 候选池（不默认下载）────────────────────────────────
+license_src = "Qwen/Qwen3-ASR-0.6B 模型页标 apache-2.0"
+
 [[model]]
 id       = "seaco_paraformer"
 role     = "asr.optional"
 route    = "非自回归 + 热词"
 size_mb  = 953
 url      = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+# ⚠️ 这个 URL 指向的是 paraformer-zh-**small**，不是 SeACo-Paraformer —— 条目写错了。
+#    它不在默认引擎里、也不参与首发，但用之前必须先核对成真正的 SeACo 包，
+#    否则「热词分支」那条路会拿错模型。许可与校验和一并待核。
 archive  = "tar.bz2"
 sha256   = ""
 license  = "未核实"

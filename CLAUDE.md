@@ -58,7 +58,7 @@
 PYTHONPATH=src python3 -m transcribe_local setup              # 首启向导：查依赖 → 下模型 → 写 config.yaml
 PYTHONPATH=src python3 -m transcribe_local setup --minimal    # 只装一路（271 M），先出一份稿子
 PYTHONPATH=src python3 -m transcribe_local doctor            # 查依赖与模型
-PYTHONPATH=src python3 -m transcribe_local models pull       # 下模型（约 2.8 G）
+PYTHONPATH=src python3 -m transcribe_local models pull       # 下模型（下载 2.3 G / 占盘 2.7 G）
 PYTHONPATH=src python3 -m transcribe_local serve             # 起本机服务，界面在浏览器里开
 PYTHONPATH=src python3 -m transcribe_local run 音频.m4a       # 跑全链（命令行）
 PYTHONPATH=src python3 -m transcribe_local run 音频.m4a --no-fuse   # 只跑到分歧册
@@ -101,7 +101,8 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 
 - [ ] **同配置各跑 3 遍取均值，换掉 README 里那张表的单样本数字。**
       现在那些数是各跑一次的结果（已在 README 里注明不是平均值）。这一步方差很大，单样本会骗人。
-- [ ] 逐个核实模型许可，补齐 `models/manifest.toml` 的 `license` 与 `sha256`
+- [x] 模型许可与 `sha256` 已补齐（默认那七个；来源见 `license_src`）
+- [ ] `seaco_paraformer` 那条的 URL 指的是 `paraformer-zh-small`，不是 SeACo —— 用之前先核对
 - [x] BSL 的 Licensor 与 Change Date 已填实（Change Date = 2030-10-01）
 - [x] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 六屏已通，标准库起服务、无新依赖
 - [ ] 英文 profile
