@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from app import accounts, db, postprocess
+from app import db, postprocess
 
 _EMAIL = "pp_db_test@example.com"
 _OTHER = "pp_other@example.com"
@@ -27,9 +27,7 @@ def _clean():
         with db.connect() as c:
             c.execute("DELETE FROM postprocess_jobs WHERE user_email IN (%s,%s)", (_EMAIL, _OTHER))
             c.execute("DELETE FROM postprocess_redact_lists WHERE user_email IN (%s,%s)", (_EMAIL, _OTHER))
-            c.execute("DELETE FROM ledger WHERE email IN (%s,%s)", (_EMAIL, _OTHER))
             c.execute("DELETE FROM jobs WHERE user_email IN (%s,%s)", (_EMAIL, _OTHER))
-            c.execute("DELETE FROM users WHERE email IN (%s,%s)", (_EMAIL, _OTHER))
     wipe()
     yield
     wipe()
@@ -124,39 +122,6 @@ def test_job_summaries_scoped():
     assert set(s) == {jid}
     assert s[jid]["totalSteps"] == 1 and s[jid]["status"] == "queued"
 
-
-# ── 结账：幂等 + 免费不入账 ──
-
-@pytest.mark.infra
-def test_settle_postprocess_idempotent():
-    with db.connect() as c:
-        c.execute("INSERT INTO users (email, balance_cents) VALUES (%s, 1000)", (_EMAIL,))
-    jid = _mk_job()
-    assert accounts.settle_postprocess(_EMAIL, jid, 200, file_name="访谈.m4a") is True
-    assert accounts.balance_cents(_EMAIL) == 800
-    assert accounts.settle_postprocess(_EMAIL, jid, 200) is False   # 幂等：不重复扣
-    assert accounts.balance_cents(_EMAIL) == 800
-    led = accounts.list_ledger(_EMAIL)
-    assert len(led) == 1 and led[0]["kind"] == "pp_charge" and led[0]["amountCents"] == -200
-
-
-@pytest.mark.infra
-def test_settle_postprocess_free_writes_nothing():
-    jid = _mk_job()
-    assert accounts.settle_postprocess(_EMAIL, jid, 0) is False
-    assert accounts.list_ledger(_EMAIL) == []
-
-
-@pytest.mark.infra
-def test_pp_charge_does_not_collide_with_transcription_charge():
-    # 同一 job：转录 charge 与后处理 pp_charge 两条流水并存，两个部分唯一索引互不干扰
-    with db.connect() as c:
-        c.execute("INSERT INTO users (email, balance_cents) VALUES (%s, 1000)", (_EMAIL,))
-    jid = _mk_job()
-    accounts.settle_job(_EMAIL, jid, "访谈.m4a", "zh", 60, 15, reserved_cents=15)
-    assert accounts.settle_postprocess(_EMAIL, jid, 200) is True
-    kinds = sorted(r["kind"] for r in accounts.list_ledger(_EMAIL))
-    assert kinds == ["charge", "pp_charge"]
 
 
 @pytest.mark.infra

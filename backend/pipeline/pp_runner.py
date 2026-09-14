@@ -28,7 +28,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from app import accounts, blobstore, claude_gate, jobstore, postprocess, speaker_labels
+from app import blobstore, claude_gate, postprocess, speaker_labels
 from app.redact_diff import load_transcript_segments as _load_transcript_segments, segments_to_qa
 # ↑ 后处理输入的唯一算法；api 侧的改动对比要算出同一份稿子，两处分家就会报出假改动
 
@@ -261,15 +261,8 @@ def run(pp: dict) -> None:
             blobstore.put_bytes(f"postprocess/{job_id}/qc.md", qc_md.encode("utf-8"),
                                 "text/markdown; charset=utf-8")
 
-        # won=True 才结账（终态持有守卫，同转录 worker；库层唯一索引再兜一层幂等）
-        won = postprocess.set_done(job_id, list(steps), qc_fix_count, has_qc)
-        if won and pp.get("price_cents", 0) > 0 and pp.get("user_email"):
-            try:
-                job = jobstore.get_job(job_id)
-                accounts.settle_postprocess(pp["user_email"], job_id, pp["price_cents"],
-                                            file_name=job.file_name if job else None)
-            except Exception:  # noqa: BLE001  结账失败不拖垮产物交付（产物已上 R2）
-                print(f"后处理结账失败 job={job_id}: {traceback.format_exc()[-300:]}", flush=True)
+        # 本机版：不收费，没有结账这一步
+        postprocess.set_done(job_id, list(steps), qc_fix_count, has_qc)
     except Exception:
         postprocess.set_failed(job_id, step, traceback.format_exc()[-2000:])
     finally:

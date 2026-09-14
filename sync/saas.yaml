@@ -46,15 +46,14 @@ rules:
   - glob: ["server/pipeline/vendor/*"]
     as: skip
     why: 云端各家引擎与模糊对齐，本地用 src/transcribe_local 这套
-  - glob: ["server/pipeline/orchestrator.py", "server/pipeline/merge.py", "server/pipeline/skill_merge.py",
-           "server/pipeline/_load.py", "server/pipeline/smoke.py", "server/pipeline/debug_dump.py",
+  - glob: ["server/pipeline/orchestrator.py", "server/pipeline/_load.py", "server/pipeline/smoke.py",
            "server/pipeline/sync-check.sh"]
     as: skip
-    why: 云端编排、定字派单、中间产物留档、上游巡检；本地第 3 步写同签名的 transcribe 替换
-  - glob: ["server/tests/test_orchestrator*.py", "server/tests/test_merge.py", "server/tests/test_skill_merge.py",
+    why: 云端编排与上游巡检；本地写同签名的 pipeline/local_orchestrator.transcribe 替换
+  - glob: ["server/tests/test_orchestrator*.py",
            "server/tests/test_p1_status_isolation.py", "server/tests/test_p2_line_parse.py",
            "server/tests/test_phase2_lang_gate.py", "server/tests/test_phase3_deepseek.py",
-           "server/tests/test_debug_dump.py", "server/tests/test_load.py", "server/tests/test_smoke.py",
+           "server/tests/test_load.py", "server/tests/test_smoke.py",
            "server/tests/test_elevenlabs_silent_part.py", "server/tests/test_elv_request_params.py",
            "server/tests/test_gemini_*.py", "server/tests/test_xunfei_signature.py",
            "server/tests/test_engine_gate.py"]
@@ -166,17 +165,34 @@ rules:
     as: modify
     why: 去掉营销站的元信息与预渲染、Sentry 依赖；构建产物随本地包发布
 
+  # ───────────── 原样同步：本机定字不走它们，但后处理、定字探活、运行面板要用 ─────────────
+  - glob: ["server/pipeline/skill_merge.py"]
+    as: modify
+    real_content: true
+    why: 同下；另有一句注释点了客户项目的术语库名 —— 本地副本只把那句改成泛称，逻辑原样
+  - glob: ["server/pipeline/merge.py", "server/pipeline/debug_dump.py"]
+    as: same
+    why: 拼 claude 命令、判定调用结果、中间产物留档、运行面板读的定字参数都在这里；导入时不依赖云端
+
+  # ───────────── 有意不同：连库测试去掉计费用例 ─────────────
+  - glob: ["server/tests/test_jobstore_integration.py", "server/tests/test_postprocess_db_integration.py"]
+    as: modify
+    why: 去掉测预扣返还与后处理结账的用例（本机不收费）；其余用例原样，改连本机 SQLite 跑
+
   # ───────────── 先拿进来，第 2–4 步再定 ─────────────
+  - glob: ["server/tests/test_merge.py", "server/tests/test_skill_merge.py", "server/tests/test_debug_dump.py"]
+    as: defer
+    why: 上面三个模块的测试；其中派单相关的用例可能依赖云端 vendor 目录，拿进来后逐个看
   - glob: ["server/tests/integration/*", "server/tests/test_api.py", "server/tests/test_worker.py",
            "server/tests/test_worker_postprocess.py", "server/tests/test_config.py",
            "server/tests/test_db_guard.py", "server/tests/test_db_integration.py",
            "server/tests/test_blobstore_integration.py", "server/tests/test_create_job_integration.py",
-           "server/tests/test_jobstore_integration.py", "server/tests/test_schema_covers_code.py",
+           "server/tests/test_schema_covers_code.py",
            "server/tests/test_claude_gate*.py", "server/tests/test_p3_*.py",
            "server/tests/test_health_view_infra.py", "server/tests/test_alerts_infra.py",
            "server/tests/test_balances.py", "server/tests/test_no_degrade_leak.py",
            "server/tests/test_rate_limit_retry.py", "server/tests/test_lint.py",
-           "server/tests/test_glossary_db_integration.py", "server/tests/test_postprocess_db_integration.py",
+           "server/tests/test_glossary_db_integration.py",
            "server/tests/test_pp_degraded_integration.py"]
     as: defer
     why: 连数据库、存储或云端配置的测试 —— 第 2 步换底座时逐个定：改连本机，或随云端功能删掉

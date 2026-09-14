@@ -121,8 +121,7 @@ def purge_transcripts(email: str) -> dict:
     它跑完还会往回写，写进一个已经不存在的任务。
     """
     with db.connect() as conn:
-        if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone() is None:
-            raise DeleteRejected("账户不存在。")
+        # 本机版：单用户、没有 users 表，不查「账户存不存在」
         n = conn.execute(
             "SELECT count(*) FROM jobs WHERE user_email = %s AND status IN ('queued','running')",
             (email,),

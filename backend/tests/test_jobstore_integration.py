@@ -117,30 +117,6 @@ def test_watchdog_fail_branch_leaves_job_unrefunded_for_sweep():
     assert row[0] is None   # 待清扫状态
 
 
-@pytest.mark.infra
-def test_watchdog_fail_then_sweep_credits_via_accounts():
-    # 端到端（模拟 worker 看门狗行为）：硬判失败 → sweep_unrefunded_failures 补返 →
-    # 余额真加回来；再扫/再回收都幂等，不重复返
-    from app import accounts
-
-    email = "refund-watchdog@test.com"
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO users (email, balance_cents) VALUES (%s, 100000) "
-            "ON CONFLICT (email) DO UPDATE SET balance_cents = 100000", (email,),
-        )
-    before = accounts.balance_cents(email)
-    jid = jobstore.create_job("audio/x.m4a", "zh", "meeting", email, reserved_cents=600)
-    jobstore.claim_next_queued()
-    _age(jid, 99)
-    assert jobstore.requeue_stale_running(minutes=30, max_attempts=1) == 1
-    assert accounts.sweep_unrefunded_failures() == 1
-    assert accounts.balance_cents(email) == before + 600
-    # 幂等：第二轮回收无事可做、再扫不重复返
-    assert jobstore.requeue_stale_running(minutes=30, max_attempts=1) == 0
-    assert accounts.sweep_unrefunded_failures() == 0
-    assert accounts.balance_cents(email) == before + 600   # 余额没有被再次加
-
 
 @pytest.mark.infra
 def test_set_failed_persists_public_message_separately():
@@ -278,26 +254,6 @@ def test_list_queued_ids_limit_and_zero():
     assert len(jobstore.list_queued_ids(2)) == 2   # 受 limit 约束
     assert jobstore.list_queued_ids(0) == []        # limit<=0 → 空，不查库
 
-
-@pytest.mark.infra
-def test_fail_stale_queued_releases_after_timeout():
-    # 排队超 QUEUED_MAX_HOURS（派单永久性坏死等）→ 判失败释放；预扣款由清扫器按
-    # 「failed+有预扣+未标记」补返（与其他失败路径同一条返还路）
-    from app import accounts
-
-    email = "queued-stale@test.com"
-    with db.connect() as conn:
-        conn.execute("INSERT INTO users (email, balance_cents) VALUES (%s, 1000) "
-                     "ON CONFLICT (email) DO UPDATE SET balance_cents = 1000", (email,))
-    jid = accounts.reserve_and_create_job(email, 300, "audio/qs.m4a", "zh", "meeting")
-    assert accounts.balance_cents(email) == 700
-    _age(jid, 60 * 25)                                    # 拨老 25 小时
-    assert jobstore.fail_stale_queued(hours=24) == 1
-    job = jobstore.get_job(jid)
-    assert job.status == "failed"
-    assert job.error_public == "转录失败，请重试；本次不计费"   # 复用唯一话术，不新增种类
-    assert accounts.sweep_unrefunded_failures() == 1      # 清扫补返
-    assert accounts.balance_cents(email) == 1000
 
 
 @pytest.mark.infra

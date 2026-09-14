@@ -1,22 +1,17 @@
-# ASR 流水线运行时依赖（跨 P0–P5）
-google-genai==2.8.0
-dashscope
-requests
-oss2
-opencc-python-reimplemented
-python-docx
-pypinyin
-jieba
-# 前台 API + 排队 + 存储（里程碑 B）
+# 本机后端（与线上不同）：数据库是标准库 sqlite3、存储是本机文件夹，所以没有 psycopg / boto3；
+# 不上报 Sentry；识别层是 src/transcribe_local（它自己的依赖见仓库根目录 pyproject.toml），
+# 线上那些云端识别引擎的库一个都不需要。下面这些是后端代码实际导入的（2026-09-14 逐个核过）。
+
+# 接口服务
 fastapi
 uvicorn[standard]
 python-multipart
-psycopg[binary]
-boto3
-# 错误监控（未配 SENTRY_DSN 则不启用）
-sentry-sdk[fastapi]
+# 导出 docx、读 .docx 大纲
+python-docx
+# 术语库助手、定字后端调用
+httpx
+# 运行面板读定字参数
+PyYAML
 # 测试
 pytest
 ruff
-httpx
-PyYAML

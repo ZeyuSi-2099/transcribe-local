@@ -3,9 +3,7 @@
 `jobstore`/`blobstore` 为模块级名字，测试可 monkeypatch 成假实现。
 """
 import hashlib
-import ipaddress
 import json
-import math
 import os
 import queue
 import re
@@ -13,10 +11,9 @@ import subprocess
 import tempfile
 import threading
 import time
-import traceback
 import uuid
 from contextlib import asynccontextmanager
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from datetime import datetime, timedelta, timezone
 
@@ -25,11 +22,9 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from .user_errors import UserError
-from . import (account_delete, accounts, alerts, balances, bidi, blobstore, claude_gate, config, db, export,
-               fly_machines, freebies, glossary, glossary_assist, jobstore, node_events, p3_health,
-               outline_file, payments, postprocess, pricing, projects, redact_diff,
-               speaker_labels)
-from . import admin_users as admin_users_mod   # 别名：路由函数已叫 admin_users，同名会互相盖掉
+from . import (account_delete, alerts, balances, bidi, blobstore, claude_gate, config, db, export,
+               glossary, glossary_assist, jobstore, local, node_events, p3_health,
+               outline_file, postprocess, redact_diff, speaker_labels)
 
 # 允许上传的扩展名：音频直接转录，视频由 P0(ffmpeg) 抽音频。服务端兜底校验（前端 picker 之外再防一层）。
 _ALLOWED_UPLOAD_EXT = {
@@ -54,64 +49,42 @@ def _probe_duration_sec(path: str) -> float | None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Render 免费层只能起一个服务 → 设 RUN_WORKER_IN_API=1 让 api 进程内顺带跑 worker 线程。
-    # 本地 docker 有独立 worker 服务，不设此变量。延迟 import 避免本地 api 加载重型 pipeline。
+    """本机版：启动时建表、建存储目录，并在接口进程里起后台（一次一单）。
+    设 RUN_WORKER_IN_API=0 只起接口、不跑转录（调界面时用）。"""
+    db.init_schema()
+    blobstore.ensure_bucket()
     stop = None
-    # 三种形态：① FLY_DISPATCH=1（Render 前台）→ 只起看门狗+派单，转录在 Fly 任务机器上跑；
-    # ② RUN_WORKER_IN_API=1（免费层合一）→ 进程内起 worker 处理池；③ 都不设 → 纯 API。
-    if config.FLY_DISPATCH:
-        try:
-            from . import worker
-            _, stop = worker.start_in_thread(with_workers=False)
-            print("Fly 派单模式：api 进程起看门狗+派单线程（转录在 Fly 机器上跑）", flush=True)
-        except Exception as e:  # noqa: BLE001  起不来也保住 API + /healthz
-            import traceback as _tb
-            try:
-                import sentry_sdk
-                sentry_sdk.capture_exception()
-            except Exception:
-                pass
-            print(f"派单线程启动失败，降级为纯 API：{e}\n{_tb.format_exc()[-300:]}", flush=True)
-    elif os.environ.get("RUN_WORKER_IN_API"):
-        try:
-            from . import worker
-            _, stop = worker.start_in_thread()
-            print("api 进程内已启动 worker 线程（RUN_WORKER_IN_API）", flush=True)
-        except Exception as e:  # noqa: BLE001  worker 起不来也要保住 API + /healthz，不整体崩
-            import traceback as _tb
-            try:
-                import sentry_sdk
-                sentry_sdk.capture_exception()
-            except Exception:
-                pass
-            print(f"worker 线程启动失败，降级为纯 API：{e}\n{_tb.format_exc()[-300:]}", flush=True)
+    if os.environ.get("RUN_WORKER_IN_API", "1") != "0":
+        from . import worker
+        _, stop = worker.start_in_thread()
     yield
     if stop is not None:
         stop.set()
 
 
-def _init_sentry() -> None:
-    # 错误监控：仅当配了 SENTRY_DSN 才启用（未配=静默，本地/测试无副作用）。
-    # 在 app 创建前 init，便于 sentry-sdk 自动插桩 FastAPI。
-    dsn = os.environ.get("SENTRY_DSN")
-    if not dsn:
-        return
-    try:
-        import sentry_sdk
-        sentry_sdk.init(
-            dsn=dsn,
-            environment=os.environ.get("SENTRY_ENV", "production"),
-            traces_sample_rate=0.1,
-            send_default_pii=False,  # 访谈含 PII，不自动带 IP/cookie/body
-        )
-        print("Sentry 已启用", flush=True)
-    except Exception as e:  # noqa: BLE001  监控接不上不该拖垮服务
-        print(f"Sentry 初始化失败（跳过）: {e}", flush=True)
-
-
-_init_sentry()
-
 app = FastAPI(title="Transcribe API", lifespan=lifespan)
+
+# 本机版：只服务本机浏览器。Host 与 Origin 两道检查，挡两类攻击 ——
+# ① DNS 重绑定：外网网页把自己的域名解析到 127.0.0.1 后读接口，这时 Host 头是那个域名；
+# ② 跨站提交：任意网页都能让浏览器往 127.0.0.1 发表单（上传、删除），这时 Origin 头不是本机。
+_LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+_HOST_RE = re.compile(r"^(?:\[(?P<v6>[^\]]+)\]|(?P<name>[^:]+))(?::\d+)?$")
+
+
+def _hostname(host_header: str) -> str:
+    m = _HOST_RE.match(host_header or "")
+    return (m.group("v6") or m.group("name") or "").lower() if m else ""
+
+
+@app.middleware("http")
+async def _local_only(request: Request, call_next):
+    if _hostname(request.headers.get("host", "")) not in _LOCAL_HOSTNAMES:
+        return JSONResponse({"detail": "只接受本机访问"}, status_code=403)
+    origin = request.headers.get("origin")
+    if origin and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if (urlparse(origin).hostname or "").lower() not in _LOCAL_HOSTNAMES:
+            return JSONResponse({"detail": "只接受本机页面发起的请求"}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -133,27 +106,6 @@ def healthz():
     """存活信号（不鉴权、不碰 DB）。收 GET + HEAD——UptimeRobot 默认用 HEAD 探活，
     只声明 GET 会回 405 被误判 down。"""
     return {"ok": True}
-
-
-# 已下架公开页的墓碑（2026-08-18 起服务 /quote 与 /{lang}/quote，见 vercel.json）。
-#
-# 为什么这条要绕到后端来：**410 只能由服务端给**，而 Vercel 的 `vercel.json` 里
-# 能返回自定义状态码的只有 `routes`，它与我们已经在用的 `rewrites`/`redirects`
-# **互斥**（同时出现会构建失败）。前端又是纯静态站、零 serverless function。
-# 而 `/api/(.*)` → Render 这条 rewrite 早就在了，借它最省事、也不新增部署面。
-#
-# 为什么是 410 不是 404：这 8 个网址（报价器八门）已经提交给 GSC 与 Bing，
-# 404 会让引擎按"可能是临时故障"反复回来重试几个月；410 是"永久没了"，移除得快得多。
-# 也不做 301 到 /pricing：那是"搬家了"，而报价器不是搬家，是**撤掉**——
-# 骗引擎说内容在别处，只会让 /pricing 收到一堆不匹配的历史信号。
-@app.api_route("/api/gone", methods=["GET", "HEAD"])
-def gone():
-    body = (
-        "<!doctype html><meta charset=utf-8><title>Gone</title>"
-        "<p>This page has been removed."
-        ' <a href="https://transcribe.solutions/pricing">See pricing</a>.</p>'
-    )
-    return Response(content=body, status_code=410, media_type="text/html; charset=utf-8")
 
 
 def _disposition(filename: str) -> dict[str, str]:
@@ -186,28 +138,9 @@ def _segments_to_txt(segments: list[dict], lang: str = "", ui: str = "zh") -> st
     return "\n\n".join(lines)
 
 
-SESSION_COOKIE = "tx_session"
-
-
-def _session_token(request: Request) -> str | None:
-    """取会话凭证：优先 Authorization 头（前端 fetch），否则 Cookie。
-
-    Cookie 是给浏览器自发请求用的——<audio> 标签和导出下载链接带不了
-    Authorization 头，登录时种的 HttpOnly Cookie 让它们也能过鉴权。
-    """
-    h = request.headers.get("authorization", "")
-    if h.lower().startswith("bearer "):
-        return h[7:]
-    return request.cookies.get(SESSION_COOKIE)
-
-
 def _current_email(request: Request) -> str:
-    """会话校验：无效/过期 → 401。"""
-    token = _session_token(request)
-    email = accounts.session_email(token) if token else None
-    if not email:
-        raise HTTPException(status_code=401, detail="not signed in")
-    return email
+    """本机版：单用户、不登录，所有请求都算本机用户。"""
+    return local.EMAIL
 
 
 def _owned_job(job_id: str, request: Request):
@@ -223,13 +156,8 @@ def _owned_job(job_id: str, request: Request):
 
 
 def _admin_email(request: Request) -> str:
-    """管理员校验：登录 + 邮箱在 ADMIN_EMAILS 白名单。未登录或非管理员一律 404
-    （不暴露运营后台存在性，与 _owned_job 同口径）。"""
-    token = _session_token(request)
-    email = accounts.session_email(token) if token else None
-    if not email or email.lower() not in config.ADMIN_EMAILS:
-        raise HTTPException(status_code=404, detail="not found")
-    return email
+    """本机版：本机用户就是管理员（运行面板）。"""
+    return local.EMAIL
 
 
 @app.get("/api/admin/overview")
@@ -337,14 +265,6 @@ def admin_health(request: Request, hours: int = 24):
     return health_view.snapshot(hours=max(1, min(hours, 168)))
 
 
-@app.get("/api/admin/expiries")
-def admin_expiries(request: Request):
-    """会到期的凭证清单（仅管理员）。手工维护，唯一来源见 app/expiries.py。"""
-    _admin_email(request)
-    from . import expiries
-    return {"items": expiries.list_expiries(), "warnDays": expiries.WARN_DAYS}
-
-
 @app.get("/api/admin/alerts")
 def admin_alerts(request: Request, days: int = 7, unhandled: int = 0):
     """告警记录（仅管理员）。此前告警只发一封邮件、发完即忘，漏看一次就永远查不到。"""
@@ -354,99 +274,12 @@ def admin_alerts(request: Request, days: int = 7, unhandled: int = 0):
             "retentionDays": alerts.RETENTION_DAYS}
 
 
-@app.get("/api/admin/growth")
-def admin_growth(request: Request, week: str = "", tests: str = ""):
-    """增长漏斗（仅管理员）：十个数各三列 + 钱的总账 + 免费发放序列。**返回里没有邮箱**。
-    week 形如 2026-W36，缺省本周。格式不对回 422，别静默当成本周。"""
-    _admin_email(request)
-    from . import growth
-    if week:
-        try:
-            growth.parse_week(week)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=422, detail="week 需形如 2026-W36")
-    s = growth.snapshot(week=week or None, include_tests=tests == "1")
-    return {**s, "report": growth.render_report(s)}
-
-
-@app.post("/api/admin/growth/report")
-def admin_growth_report(request: Request):
-    """驾驶舱「现在发一份增长周报」：立刻把上一周那份发到 ADMIN_EMAILS，验收不用等周一。
-    走告警表 fyi 档，所以发完在「告警」列表里也看得到。"""
-    _admin_email(request)
-    from . import growth
-    return growth.send_report(manual=True)
-
-
 @app.post("/api/admin/alerts/{alert_id}/handled")
 def admin_alert_handled(alert_id: int, request: Request):
     """标记一条告警已处理。**只有 act 档能标**——其余两档自己会消失，多点一次是白费动作。
     已标过的返回 changed=false（不翻案、不改人名），前端据此不必重复提示。"""
     email = _admin_email(request)
     return {"changed": alerts.mark_handled(alert_id, email)}
-
-
-@app.get("/api/admin/users")
-def admin_users(request: Request, q: str = "", limit: int = admin_users_mod.LIST_LIMIT):
-    """用户列表（仅管理员）。**不含文件名**——那只在下钻里给，见 admin_users.user_detail。"""
-    _admin_email(request)
-    return {"items": admin_users_mod.list_users(q, limit),
-            "adjustMaxCents": config.ADJUST_MAX_CENTS}
-
-
-@app.get("/api/admin/users/{email}")
-def admin_user_detail(email: str, request: Request):
-    """单用户下钻：账目 + 任务 + 计数。查无此人 404（与其余 admin 端点同口径）。"""
-    _admin_email(request)
-    d = admin_users_mod.user_detail(email)
-    if d is None:
-        raise HTTPException(status_code=404, detail="not found")
-    return d
-
-
-@app.post("/api/admin/users/{email}/adjust")
-async def admin_user_adjust(email: str, request: Request):
-    """手工调整余额（补偿 / 纠错）。理由必填、单次有上限、不许扣成负数——
-    三道闸都在 admin_users.adjust_balance 的同一个事务里，被拒时原样把话给人看。"""
-    operator = _admin_email(request)
-    body = await request.json()
-    try:
-        delta = int(body.get("deltaCents") or 0)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="调整金额要是整数分")
-    try:
-        return admin_users_mod.adjust_balance(email, delta, body.get("reason") or "", operator)
-    except admin_users_mod.AdjustRejected as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-
-@app.post("/api/admin/users/{email}/reset")
-async def admin_user_reset(email: str, request: Request):
-    """把一个邮箱重置成「从没注册过」（测试用，2026-09-03）。要把邮箱原样打一遍确认——
-    与用户侧注销同一套防误删机制。管理员账号不许；任务在跑不许。"""
-    operator = _admin_email(request)
-    body = await request.json()
-    if (body.get("confirm") or "").strip().lower() != email.strip().lower():
-        raise HTTPException(status_code=422, detail="请把要重置的邮箱原样打一遍。")
-    from . import test_accounts
-    try:
-        return test_accounts.reset_account(email, operator)
-    except test_accounts.TestAccountRejected as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-
-@app.post("/api/admin/users/{email}/simulate-usage")
-async def admin_user_simulate_usage(email: str, request: Request):
-    """给测试号记一笔模拟消耗（先扣免费分钟、再按单价扣余额；只写账本与额度，不造任务）。"""
-    operator = _admin_email(request)
-    body = await request.json()
-    from . import test_accounts
-    try:
-        return test_accounts.simulate_usage(email, int(body.get("minutes") or 0), operator)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="分钟数要是整数")
-    except test_accounts.TestAccountRejected as e:
-        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/api/admin/p3-config")
@@ -504,27 +337,13 @@ def admin_p3_config_save(request: Request, body: dict = Body(...)):
 
 @app.post("/api/admin/p3-probe")
 def admin_p3_probe(request: Request):
-    """手动探活（仅管理员）：起一台 Fly 机器真跑一次最小 `claude -p`，验证订阅此刻通不通。
+    """手动探活：真跑一次最小 `claude -p`，验证订阅此刻通不通。结果写进 p3_events，前端轮询 /p3-health 拿。
 
-    **异步**：立刻返回 probeId，机器跑完把结果写进 p3_events，前端轮询 /p3-health 拿。
-    同步等不现实——机器 boot + 调用要几十秒，HTTP 早超时了。
-    探活占一台机器名额，故池满时让位给真实转录（转录是生意，探活是自查）。"""
+    本机版：不起云机器，在本机后台线程里跑（要本机装了 claude 并登录订阅）。"""
     _admin_email(request)
-    if not config.FLY_DISPATCH or not config.FLY_API_TOKEN:
-        # 令牌只发给 Fly 机器，Render 前台既没 claude CLI 也没订阅令牌 → 非派单态无从探活
-        raise HTTPException(status_code=501, detail="未开启派单模式，无法起探活机器")
-    try:
-        busy = fly_machines.count_running_machines() >= config.FLY_MAX_MACHINES
-    except Exception:  # noqa: BLE001  数不出在飞机器就别硬起，避免越过成本闸
-        raise HTTPException(status_code=502, detail="查询机器池失败，稍后再试")
-    if busy:
-        raise HTTPException(status_code=503, detail="机器池已满（转录优先），稍后再探")
-    from . import p3_probe   # 局部导入：它依赖 pipeline，派单前台平时用不到
+    from . import p3_probe   # 局部导入：它依赖 pipeline，平时用不到
     probe_id = p3_probe.new_probe_id()
-    try:
-        fly_machines.start_task_machine(probe_id, kind="probe")
-    except Exception:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail="起探活机器失败")
+    threading.Thread(target=p3_probe.run_probe, args=(probe_id,), daemon=True, name="p3-probe").start()
     return {"probeId": probe_id}
 
 
@@ -545,217 +364,10 @@ def admin_refresh_deepseek(request: Request):
     return r
 
 
-@app.get("/api/admin/topups")
-def admin_topups(request: Request, email: str = ""):
-    """某用户的充值记录 + 每笔当前可退额（仅管理员）——发起退款前先看这张表。"""
-    _admin_email(request)
-    target = (email or "").strip().lower()
-    if not target:
-        raise HTTPException(status_code=422, detail="email 必填")
-    return {"topups": accounts.list_topups(target), "balanceCents": accounts.balance_cents(target)}
-
-
-class RefundPayload(BaseModel):
-    email: str
-    ledgerId: int
-    amountCents: int = Field(gt=0)
-    reason: str | None = None
-
-
-@app.post("/api/admin/refunds")
-async def admin_refund(request: Request):
-    """发起充值退款（仅管理员）：校验额度 → 调 provider 退款 API。
-
-    **只发起，不动余额**——余额扣减一律等 provider 的退款 webhook 回来走 claim_and_debit。
-    否则「退款 API 失败但余额已扣」的不一致会留在库里。provider adapter 未接入时返回 501，
-    运营看到的是「没退成」，不会误以为钱已经退出去了。
-    鉴权在 body 校验之前（先 404 后 422），与 admin_set_balance 同口径。"""
-    _admin_email(request)
-    try:
-        payload = await request.json()
-        if not isinstance(payload, dict):
-            raise ValueError("body 需为对象")
-        p = RefundPayload(**payload)
-    except (ValidationError, ValueError):
-        raise HTTPException(status_code=422, detail="invalid refund")
-    target = p.email.strip().lower()
-    provider = _topup_provider(target, p.ledgerId)
-    try:
-        refund_id = accounts.create_refund(target, p.ledgerId, p.amountCents, provider)
-    except accounts.RefundNotAllowed as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"超出可退额：本笔最多可退 {e.allowed} 分"
-                   f"（14 天窗口内、扣除已消耗与在途冻结、并已减去其它待处理退款）",
-        )
-    # 占额已落库。**只有确定没退成才作废**——超时/断连/5xx 一律保持 pending：
-    # 请求可能已经到达 provider 并执行成功，只是响应回不来；作废掉再收到成功回执，
-    # 就成了「钱退了、额度却被释放过」。不确定的单交给看门狗 sweep_stale_refunds 暴露给人。
-    try:
-        provider_refund_id = payments.refund(
-            provider, target, p.amountCents, p.reason or "",
-            # 原交易号：Paddle 的退款必须带它。取不到（接入前的老充值）→ RefundNotSupported → 501
-            provider_txn_id=accounts.topup_provider_txn_id(target, p.ledgerId),
-        )
-    except payments.RefundNotSupported as e:
-        accounts.fail_refund(refund_id, "provider adapter 未接入")   # 请求根本没发出去
-        raise HTTPException(
-            status_code=501,
-            detail=(f"这一笔退不了：{e.reason}。请到 {e.provider} 后台手工退这一笔"
-                    if e.reason else f"{e.provider} 退款通道未接入，请到该渠道后台手工退款"))
-    except payments.RefundRejected as e:
-        accounts.fail_refund(refund_id, f"provider 明确拒绝：{e}")    # 确定性失败
-        raise HTTPException(status_code=502, detail=f"provider 拒绝受理，额度已释放：{e}")
-    except Exception:
-        alerts.send_admin_alert(
-            "退款发起结果未知，单据保持挂起",
-            f"{target} 退款单 #{refund_id}（{p.amountCents} 分，provider={provider}）"
-            f"调用 provider 退款 API 时异常，但**不能判定为失败**（可能已受理）。\n"
-            f"单据保持 pending、额度继续占住，等 provider 回执落地。\n"
-            f"→ 请到 provider 后台确认实际状态。\n{traceback.format_exc()[-600:]}",
-            tier="act",
-        )
-        raise HTTPException(
-            status_code=502,
-            detail="退款状态未知（provider 未给回执），单据已挂起等回执——请到该渠道后台确认，不要重复发起",
-        )
-    accounts.set_refund_provider_id(refund_id, provider_refund_id)
-    return {"ok": True, "refundId": refund_id, "providerRefundId": provider_refund_id,
-            "note": "余额待退款 webhook 回来后按锁定净额扣减"}
-
-
-def _topup_provider(email: str, ledger_id: int) -> str:
-    """这笔充值当初是从哪个通道进来的（账本 source 即通道名）。查不到按 stripe 兜底。"""
-    for t in accounts.list_topups(email):
-        if t["id"] == ledger_id:
-            return t["source"] or "stripe"
-    return "stripe"
-
-
-def _set_session_cookie(response: Response, token: str) -> None:
-    response.set_cookie(
-        SESSION_COOKIE, token,
-        max_age=30 * 24 * 3600, path="/api",
-        httponly=True, samesite="lax",
-        secure=bool(os.environ.get("COOKIE_SECURE")),  # 线上 HTTPS 置 COOKIE_SECURE=1
-    )
-
-
-def _client_ip(request: Request):
-    """限流/闸④ 用客户端 IP。
-
-    生产链路是 浏览器 → Vercel rewrite 反代 → (Cloudflare) → Render：CF 看到的连接方
-    是 Vercel 出口机（2026-08-01 实测：全体真实用户经反代都记成同一个 AWS 出口 IP
-    13.52.103.55 → 闸④/发码限流会集体误伤真客户），所以 CF-Connecting-IP 在这条链上
-    是代理 IP 不是用户 IP。取序改为：
-      1. X-Vercel-Forwarded-For —— Vercel 反代写入的原始客户端 IP；
-      2. X-Forwarded-For 从左到右第一个**公网** IP（Vercel 会覆写 XFF 为真实客户端，
-         CF 只在链尾追加连接方）；
-      3. CF-Connecting-IP（无反代直连时 = 真实客户端，由 CF 写）；
-      4. socket 层地址兜底。
-    已知取舍：绕开站点直连 Render API 的脚本可以伪造 1/2 两个头换假 IP——闸④ 对
-    这类攻击者退化为软约束（闸①②③ 仍在）。根治要把 API 挂到独立子域名让浏览器直连
-    CF（见 docs/ROADMAP.md）。所有候选都过 IP 格式校验（非法串会灌爆 login_ip_throttle
-    主键），1/2 还要求是公网地址（内网/保留段是链路噪音不是用户）。"""
-    def _valid(cand: str, public_only: bool) -> str | None:
-        cand = cand.strip()
-        if not cand:
-            return None
-        try:
-            addr = ipaddress.ip_address(cand)
-        except ValueError:
-            return None
-        return cand if (addr.is_global or not public_only) else None
-
-    for h in ("x-vercel-forwarded-for",):
-        got = _valid(request.headers.get(h, "").split(",")[0], public_only=True)
-        if got:
-            return got
-    for seg in request.headers.get("x-forwarded-for", "").split(","):
-        got = _valid(seg, public_only=True)
-        if got:
-            return got
-    got = _valid(request.headers.get("cf-connecting-ip", ""), public_only=False)
-    if got:
-        return got
-    return request.client.host if request.client else None
-
-
-@app.post("/api/auth/request-code")
-def auth_request_code(request: Request, payload: dict = Body(...)):
-    email = (payload.get("email") or "").strip().lower()
-    if "@" not in email or len(email) > 254:
-        raise HTTPException(status_code=422, detail="invalid email")
-    # 闸②一次性邮箱：发码前就拒（既拒注册也省 Resend 额度）。清单见 freebies/data
-    if freebies.is_disposable(email):
-        raise UserError(422, "email_disposable")
-    ip = _client_ip(request)
-    # 界面语言决定验证码邮件用哪门语言（前端带上；缺省/不认识一律英文）
-    lang = str(payload.get("lang") or "en")
-    try:
-        dev_code = accounts.request_code(email, ip=ip, lang=lang)
-    except accounts.RateLimited as e:
-        if e.kind == "cooldown":
-            msg = "请求过于频繁，请稍后再试"
-        elif e.kind == "ip":
-            msg = "该网络请求验证码过于频繁，请稍后再试"
-        else:
-            msg = "今日验证码请求已达上限，请明天再试"
-        raise HTTPException(status_code=429, detail=msg, headers={"Retry-After": str(e.retry_after)}) from e
-    except Exception as e:  # noqa: BLE001  邮件服务故障
-        # detail 不拼内部异常串（供应商报错/密钥线索，未鉴权可见）；细节只进服务端日志
-        print(f"发信失败 email={email}: {e}", flush=True)
-        raise UserError(502, "mail_unavailable") from e
-    # 开发模式（未配邮件服务）把验证码直接返回，前端自动填入
-    return {"ok": True, **({"devCode": dev_code} if dev_code else {})}
-
-
-@app.post("/api/auth/verify")
-def auth_verify(request: Request, response: Response, payload: dict = Body(...)):
-    email = (payload.get("email") or "").strip().lower()
-    code = (payload.get("code") or "").strip()
-    # source = 前端第一次落地时存下的注册来源（只在新建用户那次落库）
-    token = accounts.verify_code(email, code, ip=_client_ip(request), source=payload.get("source"))
-    if not token:
-        raise HTTPException(status_code=401, detail="invalid or expired code")
-    _set_session_cookie(response, token)
-    return {"token": token, "email": email, "balanceCents": accounts.balance_cents(email),
-            "isAdmin": email.lower() in config.ADMIN_EMAILS}
-
-
-@app.post("/api/auth/logout")
-def auth_logout(request: Request, response: Response):
-    token = _session_token(request)
-    if token:
-        accounts.logout(token)
-    response.delete_cookie(SESSION_COOKIE, path="/api")
-    return {"ok": True}
-
-
 @app.get("/api/me")
-def get_me(request: Request, response: Response):
-    email = _current_email(request)
-    # 每次打开 app 都续 Cookie（滚动续期，配合 session_email 的 DB 续期，活跃用户永不掉线）；
-    # 也顺带补发只有 Bearer 没 Cookie 的老会话（音频/导出是浏览器自发请求，只认 Cookie）。
-    token = _session_token(request)
-    if token:
-        _set_session_cookie(response, token)
-    from . import referrals
-    return {"email": email, "balanceCents": accounts.balance_cents(email),
-            "isAdmin": email.lower() in config.ADMIN_EMAILS,
-            # 免费额度（定价 V2 §2）：前端软墙/预估要算入免费抵扣，limited=IP 闸提示
-            "free": accounts.free_status(email),
-            # 推荐礼金（2026-09-03）：账户页「推荐同行」块 + 被推荐人的待解锁行
-            "referral": referrals.summary_for(email)}
-
-
-@app.get("/api/account/delete-preflight")
-def account_delete_preflight(request: Request):
-    """注销前体检：能不能删、会删掉什么。前端据此渲染确认框，不必自己猜规则。"""
-    try:
-        return account_delete.preflight(_current_email(request))
-    except account_delete.DeleteRejected as e:
-        raise HTTPException(404, str(e)) from e
+def get_me(request: Request):
+    """本机版：单用户，打开就用，自己就是管理员。余额、免费额度、推荐不再下发。"""
+    return {"email": _current_email(request), "isAdmin": True}
 
 
 @app.delete("/api/transcripts")
@@ -764,24 +376,9 @@ def purge_transcripts_api(request: Request):
     try:
         return {"ok": True, **account_delete.purge_transcripts(_current_email(request))}
     except account_delete.DeleteRejected as e:
-        raise UserError(422, e.code) from e
-
-
-@app.delete("/api/account")
-def account_delete_api(request: Request, response: Response, payload: dict = Body(...)):
-    """执行注销。**要求把自己的邮箱原样打一遍**——这一步就是防误删的全部机制
-    （见 docs：不留反悔期，所以确认动作本身必须够重）。"""
-    email = _current_email(request)
-    typed = (payload.get("confirmEmail") or "").strip().lower()
-    if typed != email.strip().lower():
-        raise UserError(422, "confirm_email_mismatch")
-    try:
-        result = account_delete.delete_account(email)
-    except account_delete.DeleteRejected as e:
-        # 422 而不是 409：前端拿 detail 直接显示，文案已经写好了「该去做什么」
-        raise UserError(422, e.code) from e
-    response.delete_cookie(SESSION_COOKIE, path="/api")
-    return {"ok": True, **result}
+        # 本机版修正：DeleteRejected 没有 code 属性，线上这里写 `UserError(422, e.code)` 会变成 500、
+        # 用户看不到「还有任务在进行中」那句。照同文件注销前检查的写法，直接把原话给出去。
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 @app.get("/api/glossaries")
@@ -1062,18 +659,6 @@ def delete_glossary_api(request: Request, gid: str):
 # 要恢复的话：把 POST 改回来 + 前端加回选择器，但**先把结项与锁价期限想清楚**。
 
 
-@app.get("/api/projects")
-def list_projects_api(request: Request):
-    return {"projects": projects.list_projects(_current_email(request))}
-
-
-@app.post("/api/projects")
-def create_project_api(request: Request, payload: dict = Body(...)):
-    # 410 Gone 而不是 404：这个口存在过，且存量项目还在正常计费——
-    # 404 会让人以为是路由写错了，跑去"修"它。
-    raise HTTPException(410, "项目功能已下架，不再支持新建")
-
-
 # ── 后处理：配置 CRUD + 任务（契约 docs/postprocess-implementation-contract.md）──
 
 
@@ -1144,15 +729,10 @@ def start_postprocess(job_id: str, request: Request, payload: dict = Body(...)):
     existing = postprocess.get_pp_job(job_id)
     if existing and existing["status"] in ("queued", "running"):
         raise UserError(409, "pp_in_flight")
-    # 2026-08-02 改价：每步加价率 × 音频分钟，按秒折算；发起时快照 rate+时长，结算只认快照。
-    # 余额闸按「免费额度抵扣后的应付款」校验（免费额度也能抵后处理，不限文件长短）
-    pp_rate = pricing.postprocess_rate_cents_per_min(steps)
+    # 本机版：不收费 —— 没有加价率、价格与余额闸
+    pp_rate = None
     audio_sec = int(job.duration_sec or 0)
-    price = pricing.postprocess_price_cents(steps, audio_sec)
-    free_left = accounts.free_status(email)["leftSeconds"]
-    due_est = round(pp_rate * max(0, audio_sec - free_left) / 60)
-    if due_est > 0 and accounts.balance_cents(email) < due_est:
-        raise UserError(402, "balance_low")
+    price = 0
     # 清单内容在发起这一刻快照进 R2（此后改配置不影响本任务）；先落快照再排队，
     # 排队成功即保证 runner 有输入可取
     blobstore.put_bytes(
@@ -1175,13 +755,6 @@ def start_postprocess(job_id: str, request: Request, payload: dict = Body(...)):
     )
     if not ok:   # 并发抢跑：另一请求刚把它排上
         raise UserError(409, "pp_in_flight")
-    if config.FLY_DISPATCH:   # 派单失败不挡排队，看门狗会补派（同转录）
-        try:
-            fly_machines.dispatch_pending()
-        except Exception:  # noqa: BLE001
-            import traceback
-            print(f"后处理派单失败（任务已排队，待看门狗补派）job={job_id}: "
-                  f"{traceback.format_exc()[-300:]}", flush=True)
     return {"ok": True}
 
 
@@ -1327,87 +900,12 @@ def put_pp_overrides(job_id: str, request: Request, body: dict = Body(...)):
 @app.get("/api/jobs")
 def list_jobs(request: Request):
     email = _current_email(request)
-    jobs = accounts.list_jobs(email)
+    jobs = local.list_jobs(email)
     # 历史页行内后处理摘要（契约：每行可选 postprocess 字段；无后处理的行为 None）
     pp = postprocess.job_summaries(email)
     for j in jobs:
         j["postprocess"] = pp.get(j["id"])
     return {"jobs": jobs}
-
-
-@app.get("/api/ledger")
-def get_ledger(request: Request):
-    return {"ledger": accounts.list_ledger(_current_email(request))}
-
-
-@app.post("/api/ledger/invoice")
-def post_invoice(request: Request, payload: dict = Body(...)):
-    ids = payload.get("ids") or []
-    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
-        raise HTTPException(status_code=422, detail="ids 需为整数列表")
-    accounts.mark_invoiced(_current_email(request), ids)
-    return {"ok": True}
-
-
-@app.post("/api/topups")
-def post_topup(request: Request, payload: dict = Body(...)):
-    """充值。配置 STRIPE_SECRET_KEY 后走 Stripe Checkout（返回支付页 URL）；
-    未配置时：仅本地开发（无 RESEND）直充自测，生产环境一律 503 拒绝——杜绝免费到账。"""
-    email = _current_email(request)
-    amount = payload.get("amountCents")
-    if not isinstance(amount, int) or amount < 500 or amount > 1000000:
-        raise HTTPException(status_code=422, detail="amountCents 需为 500–1000000 的整数")
-    # 测试号 / 管理员（2026-09-03）：不跳 Paddle，直接入账、account 上记 source=test；礼金链路照常触发
-    from . import test_accounts
-    if test_accounts.is_test(email):
-        return {"ok": True, "balanceCents": test_accounts.direct_topup(email, amount)}
-    # 收款通道优先级：Paddle（MoR，定价 V2 目标通道）→ Stripe（历史备选）→ dev 直充（仅开发模式）
-    if os.environ.get("PADDLE_API_KEY"):
-        from . import paddle_pay
-        return {"checkoutUrl": paddle_pay.create_checkout(email, amount)}
-    if os.environ.get("STRIPE_SECRET_KEY"):
-        from . import stripe_pay
-        url = stripe_pay.create_checkout(email, amount)
-        return {"checkoutUrl": url}
-    # 没接收款通道：生产环境失败关闭（杜绝白嫖），只有本地开发模式保留直充便于自测
-    if not accounts.email_dev_mode():
-        raise UserError(503, "topup_closed")
-    new_balance = accounts.credit(email, amount, "dev")
-    return {"ok": True, "balanceCents": new_balance}
-
-
-@app.get("/api/topups/pending")
-def get_pending_topups(request: Request):
-    """「在路上」的充值（2026-09-06）：界面每 5 秒问一次；后端顺手向 Paddle 对账，付了就入账。
-    没接 Paddle 时永远是空列表（测试号直充与 dev 直充不经过这里）。"""
-    email = _current_email(request)
-    if not os.environ.get("PADDLE_API_KEY"):
-        return {"items": [], "balanceCents": accounts.balance_cents(email)}
-    from . import paddle_pay
-    return {"items": paddle_pay.pending_for(email), "balanceCents": accounts.balance_cents(email)}
-
-
-@app.post("/api/stripe/webhook")
-async def stripe_webhook(request: Request):
-    """Stripe 回调：支付完成 → 入账。未配置 webhook secret 时此端点拒绝。"""
-    if not os.environ.get("STRIPE_WEBHOOK_SECRET"):
-        raise HTTPException(status_code=503, detail="stripe not configured")
-    from . import stripe_pay
-    payload = await request.body()
-    okk = stripe_pay.handle_webhook(payload, request.headers.get("stripe-signature", ""))
-    return {"received": True, "credited": okk}
-
-
-@app.post("/api/paddle/webhook")
-async def paddle_webhook(request: Request):
-    """Paddle 回调：transaction.completed → 入账（金额只核对不入账，按发起时锁定的净额记）。
-    未配置 webhook secret 时此端点拒绝。"""
-    if not os.environ.get("PADDLE_WEBHOOK_SECRET"):
-        raise HTTPException(status_code=503, detail="paddle not configured")
-    from . import paddle_pay
-    payload = await request.body()
-    okk = paddle_pay.handle_webhook(payload, request.headers.get("paddle-signature", ""))
-    return {"received": True, "credited": okk}
 
 
 @app.post("/api/jobs")
@@ -1429,13 +927,6 @@ async def create_job(
     email = _current_email(request)
     if glossary_id and not glossary.owns(email, glossary_id):
         raise HTTPException(422, "invalid glossary")
-    project = None
-    if project_id:
-        project = projects.get_project(email, project_id)   # 归属校验：别人的项目等同不存在
-        if project is None:
-            raise HTTPException(422, "invalid project")
-        if project["status"] != "active":
-            raise HTTPException(422, "project closed")
     job_id = str(uuid.uuid4())
     suffix = os.path.splitext(file.filename or "")[1].lower()
     if suffix not in _ALLOWED_UPLOAD_EXT:
@@ -1473,36 +964,17 @@ async def create_job(
             raise UserError(400, "audio_duration_unreadable")
         if real_dur > config.MAX_DURATION_SEC:
             raise HTTPException(413, f"Audio too long (limit {config.MAX_DURATION_SEC // 60} min)")
-        # 费率快照：此刻的价钉死在本单上，结算只认它——日后调价动不了已上传的单。
-        # 预扣按快照 ceil 取整，宁可多冻一分，结算时多退。
-        # ⚠️ **项目费率通道 2026-08-31 关闭**（定价 V3）：项目 2026-08-18 已下架、存量为 0，
-        # 而任何存量项目行钉的都是两档时期的 50/100 分——留着这条分支只可能按 10–20 倍旧价
-        # 收钱。project_id 仍照常落库（分组信息不丢），只是不再决定价钱。
-        rate = pricing.rate_cents_per_min(lang)
-        reserved = math.ceil(real_dur / 60 * rate)
-        # 先传 R2 再「预扣+建 job 单事务」：事务里余额够则扣款并建 job、不够整体回滚——
-        # 「扣了钱但 job 没建成」的崩溃窗不存在（精确对账）。R2 传完但事务失败只留孤儿
-        # 音频对象，无钱责，7 天生命周期自清。
         audio_key = f"audio/{job_id}{suffix}"
         file.file.seek(0)
-        # 流式存进对象存储：boto3 从上传文件对象分块读，整段（含大视频）不进内存。
+        # 流式存进对象存储：分块读上传文件对象，整段（含大视频）不进内存
         blobstore.upload_fileobj(audio_key, file.file, file.content_type or "application/octet-stream")
-        # 免费额度：哈希去重与余量判定
-        # 在 reserve 的事务里做（并发安全）。付费上传不受这两条限制。
-        jid = accounts.reserve_and_create_job(email, reserved, audio_key, lang, recording_type,
-                                              file_name=file.filename,
-                                              duration_sec=int(round(real_dur)),
-                                              glossary_id=glossary_id or None,
-                                              rate_cents_per_min=rate,
-                                              project_id=project_id or None,
-                                              audio_sha256=sha.hexdigest(),
-                                              ui_lang=(ui_lang or "").strip()[:8] or None)
-        if jid is None:
-            try:
-                blobstore.delete(audio_key)   # 顺手清；失败留给 R2 生命周期
-            except Exception:  # noqa: BLE001
-                pass
-            raise UserError(402, "balance_low")
+        # 本机版：不收费 —— 没有费率快照与预扣，直接建单
+        jid = local.create_job(audio_key, lang, recording_type,
+                               file_name=file.filename,
+                               duration_sec=int(round(real_dur)),
+                               glossary_id=glossary_id or None,
+                               audio_sha256=sha.hexdigest(),
+                               ui_lang=(ui_lang or "").strip()[:8] or None)
     finally:
         # tmp_path 可能在分块拷贝抛异常那次就已创建（文件已落盘、只是拷贝没写完，含体积超限中止）——
         # 纳入同一 try 才能在这里兜到；否则每次拷贝失败都在磁盘留一个孤儿临时文件。
@@ -1512,12 +984,6 @@ async def create_job(
             except OSError:
                 pass
 
-    if config.FLY_DISPATCH:   # Fly 派单模式：建 job 后即起机器；失败不挡建 job（看门狗会补派）
-        try:
-            fly_machines.dispatch_pending()
-        except Exception:  # noqa: BLE001
-            import traceback
-            print(f"create_job 派单失败（job 已建，待看门狗补派）jid={jid}: {traceback.format_exc()[-300:]}", flush=True)
     return {"jobId": jid}
 
 
@@ -1553,23 +1019,11 @@ def retry_job(job_id: str, request: Request, ui_lang: str | None = None):
     if not blobstore.exists(audio_key):
         raise UserError(410, "audio_expired")
 
-    rate = int(rate) if rate is not None else pricing.rate_cents_per_min(lang)
-    reserved = math.ceil((dur or 0) / 60 * rate)
-    jid = accounts.reserve_and_create_job(
-        email, reserved, audio_key, lang, rtype,
-        file_name=fname, duration_sec=dur, glossary_id=gid,
-        rate_cents_per_min=rate, project_id=pid, audio_sha256=sha256,
-        # ⚠️ 界面语言**跟当下走，不跟原单走**（与费率相反）。费率沿用是因为它是对用户的
-        # 价格承诺；而重试会重新出一份报告，用户此刻读得懂哪门语言才是唯一相关的事。
+    # 本机版：不收费，重试就是用原录音再建一单
+    jid = local.create_job(
+        audio_key, lang, rtype, file_name=fname, duration_sec=dur, glossary_id=gid, audio_sha256=sha256,
+        # 界面语言跟当下走，不跟原单走：重试会重新出一份报告，用户此刻读得懂哪门语言才是唯一相关的事
         ui_lang=(ui_lang or "").strip()[:8] or old_ui)
-    if jid is None:
-        raise UserError(402, "balance_low")
-    if config.FLY_DISPATCH:
-        try:
-            fly_machines.dispatch_pending()
-        except Exception:  # noqa: BLE001
-            import traceback
-            print(f"retry 派单失败（job 已建，待看门狗补派）jid={jid}: {traceback.format_exc()[-300:]}", flush=True)
     return {"jobId": jid}
 
 
