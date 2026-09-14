@@ -55,7 +55,7 @@ def load_work(work: Path, enabled: list[str]) -> tuple[list, dict[str, list[Row]
     return blocks, rows
 
 
-SCORE_LINE = re.compile(r"^\s*\[([\d:.\s\-]+)\]\s*(\S+?)?\s*[:：]?\s*(.*)$")   # 与 score.parse 同一条
+SCORE_LINE = score.LINE                                                   # 与 score.parse 同一条
 
 
 def _parse_text(text: str) -> list[dict]:

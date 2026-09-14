@@ -87,11 +87,18 @@ def split_units(t: str) -> list[str]:
     return out
 
 
+# 一行 = `[时间] 说话人: 内容`。说话人只认「字母 / 数字 / 下划线」，**后面必须紧跟冒号**才算说话人；
+# 允许说话人后面挂一个 `[❓]`（「这句话可能不是这个人说的」），它属于说话人、不属于内容。
+# ⚠️ 2026-09-14 修：旧写法「说话人可以只有一个字符、冒号可有可无」，遇到 `SPK1: 内容` 只拿走 `S`，
+#    把 `PK1: 内容` 当正文；遇到 `M[❓]: 内容` 把 `[❓]:` 当正文，还让这一行第一句按口径 ④ 被豁免。
+LINE = re.compile(r"^\s*\[([\d:.\s\-]+)\]\s*(?:([A-Za-z0-9_]{1,12})\s*(?:\[❓\])?\s*[:：])?\s*(.*)$")
+
+
 def parse(p: Path) -> list[dict]:
     """读 `[时间] 说话人: 内容` 这种行。时间戳格式宽松，说话人可有可无。"""
     out = []
     for ln in p.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^\s*\[([\d:.\s\-]+)\]\s*(\S+?)?\s*[:：]?\s*(.*)$", ln.strip())
+        m = LINE.match(ln.strip())
         if not m or not m.group(3).strip():
             continue
         out.append(dict(ts=m.group(1).split("-")[0].strip(), role=(m.group(2) or "").strip(),

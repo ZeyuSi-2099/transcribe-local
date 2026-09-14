@@ -566,6 +566,7 @@ function onEvent(d){
         : `<div class="note">四路听完先体检：✅ 没有发现整路空、丢段、漏切。</div>`;
       break;
     }
+    case 'speaker_split': stage('', d.reason ? esc(d.reason) : `说话人：<b>${d.split}</b> 块在换人处拆开 → 共 ${d.sub} 段`); break;
     case 'divergence': stage('分歧', `实质 <b>${d.substantive}</b> 处 + 语气词 ${d.fillers} 处（已折叠）`); break;
     case 'stage':      if (d.name === 'P3') stage('P3', esc(d.text)); break;
     case 'batch':      { const s = $('#stages').lastElementChild;

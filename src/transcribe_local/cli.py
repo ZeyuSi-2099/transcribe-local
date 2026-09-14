@@ -108,6 +108,11 @@ def _printer():
                 print(f"P1  ⚠️ {w}")
             if not kw["fail"] and not kw["warn"]:
                 print("P1  ✅ 质检通过")
+        elif kind == "speaker_split":
+            if kw.get("reason"):
+                print(f"说话人  {kw['reason']}")
+            else:
+                print(f"说话人  {kw['split']} 块在换人处拆开 → 共 {kw['sub']} 段（按 Paraformer 逐字时间）")
         elif kind == "divergence":
             print(f"分歧  实质 {kw['substantive']} 处 + 语气词 {kw['fillers']} 处（已折叠）")
         elif kind == "stage" and kw["name"] == "P3":

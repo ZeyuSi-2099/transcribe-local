@@ -27,7 +27,7 @@
 
 ```
 音频 → P0 转码
-     → 声纹分段（pyannote-segmentation-3.0 + CAM++）+ VAD 补漏 → 18 秒切块
+     → 声纹分段（pyannote-segmentation-3.0 + CAM++）+ VAD 补漏 → 30 秒切块
      → P1 四路 ASR 并行（吃同一份切块）
      → 分歧册（纯 Python 穷举定位写法不一致的片段）
      → P3 大模型定字（OpenAI 协议）

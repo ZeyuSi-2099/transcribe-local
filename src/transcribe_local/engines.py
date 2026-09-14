@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import sherpa_onnx
@@ -31,6 +31,10 @@ ROUTE = {
 # AED / LLM 式自回归解码，跑两次不是同一份稿子，会复读也会吐空 —— 必须配熔断器。
 # CTC / 非自回归逐帧对齐，跑十次同一份稿子。
 NONDETERMINISTIC = {"firered_asr2", "qwen3_asr", "funasr_nano", "cohere_transcribe"}
+
+# 解码时顺带留下逐字时间的引擎 —— speaker_split 拿它判「这几个字是谁说的」。
+# 四台里 Zipformer-CTC 也报时间，但 token 是字节级 BPE、对不回单字；FireRed / Qwen3 不报。
+STAMPED = {"paraformer_2023"}
 
 # 单台跑起来的峰值常驻内存（MB），用来算能同时跑几台。
 # [未验证] 现在取的是这台引擎权重文件的字节数。onnxruntime 多半把权重 mmap 进来，
@@ -62,6 +66,7 @@ class Row:
     end: float
     speaker: int | None
     text: str
+    stamps: list[tuple[str, float]] = field(default_factory=list)   # (token, 绝对秒)，只有 STAMPED 里的引擎有
 
 
 def build(engine_id: str, num_threads: int = 2):
@@ -162,6 +167,15 @@ def _decode(rec, x: np.ndarray, a: float, b: float) -> str:
     return st.result.text.strip()
 
 
+def _decode_stamped(rec, x: np.ndarray, a: float, b: float) -> tuple[str, list[tuple[str, float]]]:
+    """同 _decode，外加每个 token 的绝对时间（秒）。"""
+    st = rec.create_stream()
+    st.accept_waveform(SR, x[int(a * SR):int(b * SR)])
+    rec.decode_stream(st)
+    r = st.result
+    return r.text.strip(), [(tok, a + t) for tok, t in zip(r.tokens, r.timestamps)]
+
+
 def _quietest(x: np.ndarray, t: float, window: float = 2.0, probe: float = 0.2) -> float:
     """在 t ± window 内找能量最低的 probe 秒，返回它的中点（与 diarize._quietest 同一算法）。"""
     lo, hi = max(0.0, t - window), min(len(x) / SR, t + window)
@@ -220,7 +234,11 @@ def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
     tag = TAG.get(engine_id, engine_id)
     span = len(x) / SR
     for i, blk in enumerate(blocks):
-        text = _decode(rec, x, blk.start, blk.end)
+        stamps: list[tuple[str, float]] = []
+        if engine_id in STAMPED:
+            text, stamps = _decode_stamped(rec, x, blk.start, blk.end)
+        else:
+            text = _decode(rec, x, blk.start, blk.end)
         why = _qc(text, blk, engine_id, cb)
         tries = [dict(step="原样", why=why, text=text)]
         for step in LADDER[:retry]:
@@ -239,7 +257,8 @@ def transcribe(engine_id: str, x: np.ndarray, blocks: list[Block], cfg: dict,
         elif len(tries) > 1:
             print(f"ℹ️ {tag} 第 {i + 1} 块 [{ts(blk.start)}] {tries[0]['why']}，第 {len(tries) - 1} 次重试"
                   f"（{tries[-1]['step']}）救回。")
-        rows.append(Row(blk.start, blk.end, blk.speaker, text))
+        rows.append(Row(blk.start, blk.end, blk.speaker, text,
+                        stamps if len(tries) == 1 else []))        # 重试过的文字与首次时间对不上，不留
         if on_block:
             on_block(i + 1, len(blocks))
     return rows, bad

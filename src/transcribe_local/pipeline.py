@@ -36,7 +36,7 @@ class Result:
 
 def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) -> Result:
     """跑完整条链。emit(kind, **kw) 是进度回调，kind 见下面各处调用。"""
-    from . import audio as au, diarize, divergence, engines, export, fuse, mem, qc
+    from . import audio as au, diarize, divergence, engines, export, fuse, mem, qc, speaker_split
 
     say = emit or (lambda *a, **k: None)
     out.mkdir(parents=True, exist_ok=True)
@@ -105,6 +105,21 @@ def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) 
                                          encoding="utf-8")
     r.qc_fail, r.qc_warn = rep.fail, rep.warn
     say("p1qc", fail=rep.fail, warn=rep.warn)
+
+    # 按换人拆块（Duner 2026-09-14 定「路 A」）：块照旧按长度切给引擎；一块里哪几个字是谁说的，
+    # 按 Paraformer 的逐字时间对到声纹分段上，拆成子块，四路同步拆。只改文字归谁，不改文字。
+    # 拆完的产物另存 work/split/（blocks.json + p1_*.md），tools/bench.py 直接指过去就能复算。
+    if cfg["diarize"].get("speaker_split", False):
+        rows, st = speaker_split.split(rows, segs)
+        sd = out / "work" / "split"
+        sd.mkdir(exist_ok=True)
+        first = next(iter(rows.values()))
+        (sd / "blocks.json").write_text(json.dumps([[q.start, q.end, q.speaker] for q in first]), encoding="utf-8")
+        (sd / "segments.json").write_text((out / "work" / "segments.json").read_text(encoding="utf-8"),
+                                          encoding="utf-8")
+        for e, row in rows.items():
+            (sd / f"p1_{engines.TAG.get(e, e)}.md").write_text(engines.dump(row), encoding="utf-8")
+        say("speaker_split", **st)
 
     p3in, ledger, found = divergence.build(rows, cfg)
     (out / "work" / "p3_input.md").write_text(p3in, encoding="utf-8")
