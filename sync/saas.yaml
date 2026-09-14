@@ -98,29 +98,31 @@ rules:
     as: skip
     why: 只被营销站、定价、登录用到（按 import 关系逐个核过：从应用入口走不到它们）
 
-  # ───────────── 有意不同：带真实内容，换成合成内容后才拿 ─────────────
-  # real_content: true = 扫描命中登记为「拿进来时必须替换」，不算放行；拿进本仓后的副本必须扫出 0。
+  # ───────────── 原样同步：带真实内容，Duner 2026-09-14 定原样公开 ─────────────
+  # 清点时扫出访谈原话、客户项目术语与大纲、注释里的录音编号（无手机号、邮箱、密钥、受访者真名）。
+  # Duner 看过逐项清单后定「原样拿进开源仓，不改」（计划页 g5）；扫描命中逐行登记在 saas_scan_allow.txt。
   - glob: ["src/lib/reviewData.ts"]
-    as: modify
-    real_content: true
-    why: 类型原样；SAMPLE_REVIEW / SAMPLE_REVIEW_SEGMENTS 按文件自述改编自一次真实访谈，仍带真实品牌、型号与业绩数字 —— 换成合成示例
+    as: same
+    why: 复核示例数据（改编自一次真实访谈）—— 原样公开
   - glob: ["server/tests/test_transcript.py", "server/tests/test_conflicts.py", "server/tests/test_review.py"]
-    as: modify
-    real_content: true
-    why: 部分用例的输入是真实访谈原句或由它生成的复核报告行（扫描逐行核出） —— 换成合成句，断言不变
-  - glob: ["src/screens/main/Result.test.tsx", "src/AppShell.test.tsx"]
-    as: modify
-    real_content: true
-    why: 断言里引用了 reviewData 的真实示例词 —— 随合成示例一起换
+    as: same
+    why: 用例输入含真实访谈原句与由它生成的复核报告行 —— 原样公开
+  - glob: ["src/screens/main/Result.test.tsx"]
+    as: same
+    why: 断言引用 reviewData 的示例词 —— 原样公开
+  - glob: ["src/AppShell.test.tsx"]
+    as: defer
+    why: 断言引用 reviewData 的示例词（原样公开）；AppShell 本身要去掉登录路由，第 4 步看这个测试跟不跟着改
   - glob: ["src/lib/glossary.test.ts", "src/screens/main/GlossaryAssist.test.tsx", "src/screens/main/OutlineIntake.test.tsx",
-           "server/tests/test_outline_file.py", "server/tests/test_glossary_assist.py"]
+           "server/tests/test_glossary_assist.py"]
+    as: same
+    why: 术语库与大纲用例取自客户项目的术语库与访谈大纲 —— 原样公开
+  - glob: ["server/tests/test_outline_file.py"]
     as: modify
-    real_content: true
-    why: 术语库与大纲用例取自客户项目的术语库与访谈大纲 —— 换成别的领域编的词条
+    why: 大纲用例原样公开（g5）；「必须登录」那条改成本机版的同一道闸：外来 Host 被拒
   - glob: ["server/pipeline/conflicts.py"]
-    as: modify
-    real_content: true
-    why: 模块头注释写了客户录音编号与金标来源 —— 只改注释，逻辑原样
+    as: same
+    why: 模块头注释写了录音编号与金标来源 —— 原样公开
   - glob: ["src/lib/sampleData.ts"]
     as: modify
     why: 类型原样；账单与充值的示例行随计费一起去掉
@@ -147,8 +149,7 @@ rules:
     why: 运营驾驶舱改成本机运行面板：资源看本机（模型、磁盘、内存、定字后端连通、DeepSeek 余额）；告警不发邮件
   - glob: ["server/app/glossary_assist.py"]
     as: modify
-    real_content: true
-    why: 模型地址写死在代码里 → 走统一的模型后端设置；注释里举了客户术语库的内部代号 → 换成泛称
+    why: 模型地址写死在代码里 → 走统一的模型后端设置（第 5 步）；注释里客户术语库的内部代号原样公开（g5）
   - glob: ["server/pipeline/pp_deepseek.py", "server/pipeline/pp_runner.py", "server/app/postprocess.py"]
     as: modify
     why: 模型地址写死在代码里 → 走统一的模型后端设置；后处理去掉按分钟收费
@@ -167,9 +168,8 @@ rules:
 
   # ───────────── 原样同步：本机定字不走它们，但后处理、定字探活、运行面板要用 ─────────────
   - glob: ["server/pipeline/skill_merge.py"]
-    as: modify
-    real_content: true
-    why: 同下；另有一句注释点了客户项目的术语库名 —— 本地副本只把那句改成泛称，逻辑原样
+    as: same
+    why: 同下；注释里点了客户项目的术语库名 —— 原样公开（g5）
   - glob: ["server/pipeline/merge.py", "server/pipeline/debug_dump.py"]
     as: same
     why: 拼 claude 命令、判定调用结果、中间产物留档、运行面板读的定字参数都在这里；导入时不依赖云端

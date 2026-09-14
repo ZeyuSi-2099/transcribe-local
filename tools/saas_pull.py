@@ -6,7 +6,6 @@
 按 sync/saas.yaml：
   same            覆盖本地 —— 原样同步，本地不改它
   modify / defer  本地还没有才复制；本地已有一律不动（那是本地改过的版本，同步时人工合并）
-  real_content    一律不复制 —— 带真实内容，得先在本地写好编的版本
   skip            不复制
 
 路径映射见 PARTS。要复制的每个文件先过一遍 saas_scan 的扫描：有没登记的命中就不复制它，退出码 1。
@@ -27,7 +26,7 @@ PARTS = {"backend": ("server/", "backend/")}
 
 
 def plan(saas_files: list[str], rules: list[dict], part: str, root: Path = S.ROOT) -> list[tuple[str, Path | None, str]]:
-    """每个线上文件 → (线上路径, 本仓目标, 动作)。动作：复制 / 覆盖 / 本地已有 / 真实内容 / 不拿 / 未登记。"""
+    """每个线上文件 → (线上路径, 本仓目标, 动作)。动作：复制 / 覆盖 / 本地已有 / 不拿 / 未登记。"""
     src, dst_prefix = PARTS[part]
     out = []
     for p in saas_files:
@@ -40,8 +39,6 @@ def plan(saas_files: list[str], rules: list[dict], part: str, root: Path = S.ROO
         dst = root / (dst_prefix + p[len(src):])
         if r["as"] == "skip":
             act = "不拿"
-        elif r.get("real_content"):
-            act = "真实内容"
         elif r["as"] == "same":
             act = "覆盖"
         elif dst.exists():

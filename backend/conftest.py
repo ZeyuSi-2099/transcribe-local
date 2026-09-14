@@ -25,6 +25,14 @@ def _isolated_storage(request, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _testclient_counts_as_local(monkeypatch):
+    """线上的接口测试用 TestClient 默认地址（Host: testserver）。本机访问检查只认本机地址，
+    测试里把这个名字当本机 —— 只放宽测试，不放宽产品代码。「外来 Host 被拒」由 test_local_api 用别的域名守着。"""
+    from app import api
+    monkeypatch.setattr(api, "_LOCAL_HOSTNAMES", api._LOCAL_HOSTNAMES | {"testserver"})
+
+
+@pytest.fixture(autouse=True)
 def _no_llm_calls(monkeypatch):
     """测试一律不许出网调大模型。要测降级路径请显式 monkeypatch 被测的调用点。"""
     if os.environ.get("TRANSCRIBE_ALLOW_LLM") == "1":

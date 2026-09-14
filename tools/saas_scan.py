@@ -8,9 +8,7 @@
      列出一条规则都没匹配上的文件 —— 线上新加的文件会从这里冒出来。
   2. 扫描：凡是要拿进来的（same / modify / defer），逐行查邮箱、密钥、手机号、身份证号、
      云端地址、本机绝对路径、像转录稿的行，以及私有词表里的词。
-     逐条人工看过、确认可以公开的命中，登记进 sync/saas_scan_allow.txt；
-     登记为 real_content 的文件（带真实内容、拿进来时必须替换），命中单列为「待替换」，不放行也不算新问题；
-     其余没登记的命中，退出码为 1。
+     逐条人工看过、确认可以公开的命中，登记进 sync/saas_scan_allow.txt；没登记的命中，退出码为 1。
 
 ⛔ 私有词表（客户专名、录音编号）只放内部仓，永不进本仓。这里只从环境变量读它的路径；
    允许清单里也只记行的指纹，不记命中的原文。
@@ -159,7 +157,7 @@ def main() -> int:
     rules = load_rules()
     files = tracked(saas)
     counts = {k: 0 for k in (*TAKEN, "skip")}
-    unregistered, hits, real = [], [], set()
+    unregistered, hits = [], []
     for p in files:
         r = classify(p, rules)
         if r is None:
@@ -168,8 +166,6 @@ def main() -> int:
         counts[r["as"]] += 1
         if r["as"] == "skip":
             continue
-        if r.get("real_content"):
-            real.add(p)
         try:
             text = (saas / p).read_text(encoding="utf-8")
         except (UnicodeDecodeError, FileNotFoundError):
@@ -177,12 +173,11 @@ def main() -> int:
         hits += scan_text(p, text, words)
 
     allow = load_allow()
-    scrub = [h for h in hits if h.path in real and h.key not in allow]
-    fresh = [h for h in hits if h.path not in real and h.key not in allow]
+    fresh = [h for h in hits if h.key not in allow]
     print(f"线上仓 {len(files)} 个文件 · 原样同步 {counts['same']} · 有意不同 {counts['modify']} · "
           f"待定 {counts['defer']} · 不拿 {counts['skip']} · 未登记 {len(unregistered)}")
-    print(f"私有词表 {len(words)} 个词 · 命中 {len(hits)} 处 · 已人工确认可公开 {len(hits) - len(fresh) - len(scrub)} · "
-          f"拿进来时必须替换 {len(scrub)}（{len(real)} 个文件）· 待看 {len(fresh)}")
+    print(f"私有词表 {len(words)} 个词 · 命中 {len(hits)} 处 · 已人工确认可公开 {len(hits) - len(fresh)} · "
+          f"待看 {len(fresh)}")
     for p in unregistered:
         print(f"  未登记  {p}")
     by_rule: dict[str, int] = {}
@@ -190,7 +185,7 @@ def main() -> int:
         by_rule[h.rule] = by_rule.get(h.rule, 0) + 1
     if by_rule:
         print("  待看按规则：" + " · ".join(f"{k} {v}" for k, v in sorted(by_rule.items(), key=lambda x: -x[1])))
-    for h in (hits if args.show_allowed else fresh + scrub):
+    for h in (hits if args.show_allowed else fresh):
         print(f"{h.key}\t# {h.path}:{h.line} {h.text.strip()[:120]}")
     return 1 if (fresh or unregistered) else 0
 

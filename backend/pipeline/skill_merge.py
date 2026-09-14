@@ -126,7 +126,7 @@ def _build_prompt(match_file: str, glossary_text: str, ui_lang: str | None = Non
     """用户术语库内联进提示词（与 DeepSeek 路同等作硬证据，优先于联网）。
 
     ⚠️ **除了这里内联的这一份，不许再有第二本术语库**（2026-08-22）。此前 vendor 根目录下
-    躺着一本 `Config/Config_Term.md`（为某个具体客户项目建的专名表）——claude -p 的
+    躺着一本 `Config/Config_Term.md`（华为渠道零售专名，为某个具体项目建的）——claude -p 的
     工作目录正是 vendor 根、Read 工具又是放开的，而 skill 第一句就是「先查本次任务的术语库」，
     于是它自己读了。后果：**用户一本库都没选，却吃到一份跟他无关的行业词表**，近音词被悄悄
     拽向那个行业的写法，且界面上没有任何交代（依据显示成「引擎证据」）。已删库 + 守卫钉死。"""
