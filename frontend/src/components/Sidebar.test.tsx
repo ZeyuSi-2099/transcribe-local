@@ -4,37 +4,39 @@ import userEvent from "@testing-library/user-event";
 import { UILangProvider } from "../lib/i18n";
 import { Sidebar } from "./Sidebar";
 
+// 本机版（与线上不同）：线上这里测余额卡、免费额度、在路上的充值——本机都没有了，
+// 改测「没有账户那一套」和「设置入口」。收起/展开那条原样保留。
 const noop = () => {};
 function renderSidebar(extra: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
   return render(
     <UILangProvider>
-      <Sidebar active="new" onNav={noop} onOpenBilling={noop} onOpenSettings={noop} onLogout={noop}
-        email="a@b.com" balance={0} {...extra} />
+      <Sidebar active="new" onNav={noop} onOpenSettings={noop} {...extra} />
     </UILangProvider>,
   );
 }
 
 beforeEach(() => { localStorage.clear(); });
 
-describe("Sidebar — 免费额度显示", () => {
-  it("有剩余免费额度时，余额卡下方显示「免费额度」+ 剩余时长", () => {
-    renderSidebar({ freeLeftSeconds: 3600 });
-    expect(screen.getByText(/免费额度|Free quota/)).toBeInTheDocument();
-    // ⚠️ 报**分钟**，不是 fmtClock 的 1:00:00（2026-08-31）：额度是按分钟发的，
-    // 用户收到的邮件里也是分钟；而上传卡那边同样报分钟——两处分家的症状是
-    // 同一屏上出现两个长得不一样的同一个数。判据钉在「分钟」上，改回时钟格式即红。
-    expect(screen.getByText(/^60 (分钟|min)$/)).toBeInTheDocument();
+describe("Sidebar — 本机版", () => {
+  it("没有余额、免费额度、充值与退出登录", () => {
+    renderSidebar({ isAdmin: true });
+    expect(screen.queryByText(/余额|Balance/)).toBeNull();
+    expect(screen.queryByText(/免费额度|Free quota/)).toBeNull();
+    expect(screen.queryByText(/充值与账单|Billing/)).toBeNull();
+    expect(screen.queryByText(/退出登录|Sign out/)).toBeNull();
   });
 
-  it("免费额度用完（0 秒）就不显示这一行", () => {
-    renderSidebar({ freeLeftSeconds: 0 });
-    expect(screen.queryByText(/免费额度|Free quota/)).toBeNull();
+  it("底部是「设置」入口，点了交给调用方开浮窗", async () => {
+    let opened = false;
+    renderSidebar({ onOpenSettings: () => { opened = true; } });
+    await userEvent.click(screen.getByRole("button", { name: /^设置$|^Settings$/ }));
+    expect(opened).toBe(true);
   });
 
-  it("未传 freeLeftSeconds（旧调用方 / 演示模式）不显示、不报错", () => {
-    renderSidebar();
-    expect(screen.queryByText(/免费额度|Free quota/)).toBeNull();
-    expect(screen.getByText(/余额|Balance/)).toBeInTheDocument();
+  it("运营驾驶舱改名「运行面板」", () => {
+    renderSidebar({ isAdmin: true });
+    expect(screen.getByText(/^运行面板$|^System status$/)).toBeInTheDocument();
+    expect(screen.queryByText(/运营驾驶舱|Operations/)).toBeNull();
   });
 });
 
@@ -60,19 +62,3 @@ describe("Sidebar — 收起/展开", () => {
     unmount();
   });
 });
-
-describe("Sidebar — 充值在路上（2026-09-06）", () => {
-  it("有在路上的充值：余额下方显示「入账中」", () => {
-    renderSidebar({ pendingTopupCents: 1000 });
-    expect(screen.getByRole("status").textContent).toMatch(/\$10\.00 入账中|\$10\.00 on its way/);
-  });
-  it("到账那几秒显示「已到账」，优先于「入账中」", () => {
-    renderSidebar({ pendingTopupCents: 0, justCreditedCents: 1000 });
-    expect(screen.getByRole("status").textContent).toMatch(/\$10\.00 已到账|\$10\.00 credited/);
-  });
-  it("没有在路上的钱：这一行不渲染", () => {
-    renderSidebar({ pendingTopupCents: 0 });
-    expect(screen.queryByRole("status")).toBeNull();
-  });
-});
-

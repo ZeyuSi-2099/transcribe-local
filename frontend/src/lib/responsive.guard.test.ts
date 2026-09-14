@@ -28,7 +28,8 @@ describe("窄窗口不裁内容", () => {
     ["src/screens/main/PostprocessPage.tsx", 824],
     ["src/screens/main/Result.tsx", 800],          // 360 复核栏 + 稿件栏
     // 2026-08-31：行尾列由 108 收回 44（「重试」挪进文件名格），固定六列 682 → 618
-    ["src/screens/HistoryPage.tsx", 836],          // 固定六列 618 + 文件名 170 + 行内边距 48
+    // 本机版：去掉「计费」一列（116），固定五列 502 + 文件名 170 + 行内边距 48
+    ["src/screens/HistoryPage.tsx", 720],
   ];
   for (const [file, min] of MIN_WIDTHS) {
     it(`${file.split("/").pop()} 声明了最小宽度 ${min}`, () => {
@@ -53,26 +54,6 @@ describe("窄窗口不裁内容", () => {
   });
 });
 
-describe("登录屏的窄屏形态", () => {
-  // /signin 是构建期预渲染的网址之一：布局若用 JS 量宽度，Node 里没有 window，
-  // 手机会先拿到宽屏版再跳变一次。所以布局必须全在 CSS 里。
-  it("布局属性不写在内联 style 上（内联会顶掉媒体查询）", () => {
-    const s = read("src/screens/LandingLogin.tsx");
-    expect(s).not.toContain("gridTemplateColumns");
-    expect(s).not.toContain('overflow: "hidden"');
-    expect(s).toContain('className="tx-login-grid"');
-  });
-
-  it("global.css 里有窄屏单列规则，且卖点文案在窄屏收起", () => {
-    const css = read("src/styles/global.css");
-    const narrow = css.slice(css.indexOf("@media (max-width: 900px)"));
-    expect(narrow).toContain(".tx-login-pitch { display: none; }");
-    expect(narrow).toContain(".tx-login-grid");
-    // 单列后内容更高，锁死一屏会让按钮够不着
-    expect(narrow).toContain(".tx-login-shell { overflow: auto; }");
-  });
-});
-
 describe("劝退的判据是设备，不是窗口宽度", () => {
   // 桌面用户把窗口拖窄是网页缩放的常态，弹提示反而怪。这条一旦改回按宽度判，
   // 坐在电脑前的人会被告知「请用电脑打开」。
@@ -85,30 +66,5 @@ describe("劝退的判据是设备，不是窗口宽度", () => {
   it("手机与平板用屏幕短边分辨——窗口宽度分不开（手机横屏比平板竖屏还宽）", () => {
     const s = read("src/screens/NarrowScreenNotice.tsx");
     expect(s).toContain("Math.min(s.width, s.height)");
-  });
-});
-
-// 首页前四拍「左文右卡、卡钉住」（2026-09-02 十拍重排，方案 C）。汇流图与它的横竖两版箭头已拆。
-// 钉住只在桌面端成立：窄屏上卡占满整屏，钉住等于挡住正文。断点与回落都写在 mk.ts 里，
-// Landing 不内联 position——内联优先级最高会顶掉媒体查询（同当年箭头 display 的坑）。
-describe("首页前四拍：左文右卡，窄屏不钉", () => {
-  it("Landing 用 CSS 类挂栅格，不内联 sticky", () => {
-    const s = read("src/screens/marketing/Landing.tsx");
-    expect(s).toContain('className="mk-story"');
-    expect(s).toContain('className="mk-story-card"');
-    for (const line of s.split("\n")) {
-      if (line.includes("mk-story")) expect(line).not.toContain("position:");
-    }
-  });
-
-  it("mk.ts 里桌面 sticky 与窄屏回落齐全", () => {
-    const css = read("src/screens/marketing/mk.ts");
-    expect(css).toContain(".mk-story-card > div { position: sticky");
-    const narrow = css.slice(css.indexOf("@media (max-width: 899px)"));
-    expect(narrow).toContain(".mk-story { grid-template-columns: 1fr");
-    expect(narrow).toContain(".mk-story-card > div { position: static");
-    // 横排小卡（标题左正文右）在 ≤520px 退成上下——140px 的标题列加正文，320px 宽的手机装不下
-    const tiny = css.slice(css.indexOf("@media (max-width: 520px)"));
-    expect(tiny).toContain(".mk-rowcard { grid-template-columns: 1fr");
   });
 });

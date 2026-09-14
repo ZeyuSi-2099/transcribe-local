@@ -40,6 +40,7 @@ export function appSourceFiles(srcRoot: string): string[] {
     // 而错的其实是这张扫描清单。
     join(srcRoot, "lib", "userErrors.ts"),
     join(srcRoot, "AppShell.tsx"),        // 实时行的「刚刚 / Just now」
+    join(srcRoot, "App.tsx"),             // 本机版：「连不上本机服务」那一屏
   ];
 }
 

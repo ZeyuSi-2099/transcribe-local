@@ -1,12 +1,13 @@
 // 2026-08-31 全链路穿测（未登录 → 定价 → 登录 → 验证码 → 上传 → 充值 → 付款 → 历史 → 复核 → 导出）
 // 改出来的东西，钉在这里。
 //
+// 本机版（与线上不同）：付款页、登录屏、定价页、免费额度那几组随页面一起去掉；firstRun 只等任务列表（没有账本）。
+//
 // 这一批的共同点是：**tsc 不会红、既有测试也不会红，只有真打开界面才看得见**——
 // 正因如此才要钉。判据一律选「只在错误状态下才成立」的特征，每条都造回过一次 bug 验证会红。
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { PRICE_ROW } from "../screens/legal/PricingPage";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf-8");
 
@@ -172,9 +173,6 @@ describe("上传页左栏放「你自己的东西」，不是卖点", () => {
     expect(read("src/AppShell.tsx")).toMatch(/recent=\{jobsLoaded \? historyItems : undefined\}/);
   });
 
-  it("HeroPitch 现在只属于登录屏", () => {
-    expect(read("src/screens/LandingLogin.tsx")).toMatch(/<HeroPitch\s*\/>/);
-  });
 });
 
 describe("语种格是可操作的控件", () => {
@@ -193,98 +191,6 @@ describe("语种格是可操作的控件", () => {
   it("两态描边同宽、字重相同——不同就会让那一格撑宽/矮 1px，整排歪掉", () => {
     expect(src).toMatch(/border: selected \? `1\.5px[\s\S]{0,60}: `1\.5px/);
     expect(src).not.toMatch(/fontWeight: selected \?/);
-  });
-});
-
-describe("免费额度只有一个口径", () => {
-  const FILES = ["src/components/Sidebar.tsx", "src/screens/main/Idle.tsx"];
-
-  it("侧栏与上传卡都报分钟（时钟格式要用户自己换算回分钟）", () => {
-    for (const f of FILES) {
-      expect(read(f), f).not.toMatch(/fmtClock\(freeLeftSeconds/);
-      expect(read(f), f).toMatch(/freeLeftSeconds[^)\n]*\)? ?\/ 60/);
-    }
-  });
-
-  it("剩不到一分钟报「< 1」不报「0」（这一行只在还有额度时才显示，写 0 就自相矛盾）", () => {
-    for (const f of FILES) {
-      // 判据钉在「有没有那条分支」上，不是「文件里有没有 Math.floor」——
-      // 只向下取整而不处理 0 的话，后者照样成立，而那正是修复前的状态。
-      expect(read(f), f).toMatch(/>= 1 \?[\s\S]{0,60}: "< 1"/);
-    }
-  });
-});
-
-describe("付款页：等待态必须看得出是我们的页面、并且正在做事", () => {
-  const src = read("src/screens/legal/PayPage.tsx");
-
-  it("结账层跟界面语言走", () => {
-    expect(src).toMatch(/locale: localeRef\.current/);
-    expect(src).toMatch(/localeRef\.current = PADDLE_LOCALE\[uiLang\]/);
-    // 两处不是裸的两字母码，写错的话 Paddle 认不出 → 静默回落浏览器语言
-    expect(src).toMatch(/zh: "zh-Hans"/);
-    expect(src).toMatch(/pt: "pt-BR"/);
-  });
-
-  it("语言**不在**依赖数组里——切语言不该重跑这个 effect", () => {
-    // 2026-09-01：曾经写成 `[hasTxn, uiLang]`。两点都不成立：locale 只在 Initialize 那一刻
-    // 生效（已弹出的结账层不会换语言），而 cleanup 只 clearTimeout ⇒ 切一次语言就再塞一份
-    // Paddle 脚本、再注册一份回调，旧的不拆。这一屏离钱最近。
-    const dep = src.slice(src.indexOf("document.head.appendChild(script)"));
-    expect(dep).toMatch(/\}, \[hasTxn\]\);/);
-    expect(dep).not.toMatch(/\}, \[hasTxn, uiLang\]\);/);
-  });
-
-  it("八门界面语言一门都不能少（少一门就是那门用户在掏钱时撞上英文结账层）", () => {
-    const table = src.slice(src.indexOf("const PADDLE_LOCALE"), src.indexOf("/** loading="));
-    for (const lang of ["en", "zh", "de", "fr", "es", "it", "pt", "ja"]) {
-      expect(table, lang).toMatch(new RegExp(`\\b${lang}:`));
-    }
-  });
-
-  it("等待态有转圈、有安心话、有出口", () => {
-    const wait = src.slice(src.indexOf("{waiting ? ("), src.indexOf(") : ("));
-    expect(wait, "没有转圈：静止的空白页读起来像挂了").toContain('animation: "spin');
-    expect(wait, "没有出口：脚本被拦住时用户只能关标签页").toContain('pub.backHome');
-    expect(wait).toContain("pay.safeNote");
-  });
-});
-
-describe("登录屏第一眼不能像「没做完」", () => {
-  const src = read("src/screens/LoginCard.tsx");
-
-  it("没有点不动的占位按钮", () => {
-    expect(src).not.toMatch(/Continue with Google/);
-  });
-
-  it("条款与隐私是真链接（它是一句法律同意声明里的入口）", () => {
-    expect(src).toMatch(/<a key="t" href=\{H\("\/terms"\)\}/);
-    expect(src).toMatch(/<a key="p" href=\{H\("\/privacy"\)\}/);
-  });
-
-  it("验证码的光标格只在聚焦时点亮（否则这一屏没有任何焦点指示）", () => {
-    // 真输入框是 opacity:0 铺在格子上，全站那条 :focus-visible 焦点环画在它身上等于看不见。
-    // 判据钉在「高亮条件里有没有 codeFocus」——只断言「有个 codeFocus 变量」不够，
-    // 变量存在而高亮仍与聚焦无关时照样绿，那正是修复前的状态。
-    expect(src).toMatch(/const cursorHere = codeFocus && i === code\.length/);
-    expect(src).toMatch(/onFocus=\{\(\) => setCodeFocus\(true\)\}/);
-    expect(src).toMatch(/onBlur=\{\(\) => setCodeFocus\(false\)\}/);
-  });
-
-  it("整屏的站内链接都带界面语言前缀，一个裸路径都没有", () => {
-    // ⚠️ 2026-09-01：同意声明里的条款/隐私改成了带前缀的真链接，**而正下方页脚那四个
-    // 还是写死的裸路径**——于是 /zh/signin 上同名的两个「服务条款」落在两棵不同语言的树上。
-    // 判据是「这个文件里不许出现 href=\"/」，不是「那四个改了没有」：后者守不住第五个。
-    const login = read("src/screens/LandingLogin.tsx");
-    expect(login.match(/href="\/[^"]*"/g) ?? [], "裸路径会把用户丢到英文那棵 URL 树").toEqual([]);
-    expect(login).toMatch(/href=\{H\("\/terms"\)\}/);
-  });
-
-  it("禁用主按钮的文字读得出来（ghost 在 panel 上只有 1.89:1，读起来像坏了）", () => {
-    const css = read("src/components/Button.module.css");
-    const dis = css.slice(css.indexOf(".btn:disabled"), css.indexOf(".sm {"));
-    expect(dis).toContain("var(--c-inkFaint)");
-    expect(dis).not.toContain("var(--c-inkGhost)");
   });
 });
 
@@ -330,7 +236,7 @@ describe("每一个关掉了焦点环的控件，都要有替代的焦点态", (
   // ⚠️ 这张表是白名单不是说明：新写一个带 `outline:"none"` 的输入框会让下面那条直接红，
   // 这正是要的效果——08-31 漏掉这一批，就是因为「漏了不报错」。
   const ALLOWED: Record<string, { n: number; via: string }> = {
-    "src/screens/TopUpModal.tsx": { n: 1, via: "tx-underline" },        // 自定义金额（下划线式）
+    // 本机版：充值浮窗不搬，线上登记的「自定义金额（下划线式）」那一处随之去掉
     "src/screens/main/Result.tsx": { n: 1, via: "tx-field" },           // 复核卡「替换成…」胶囊
     "src/screens/main/RedactChanges.tsx": { n: 1, via: "tx-field" },    // 脱敏「改成…」胶囊
     "src/screens/main/PostprocessPage.tsx": { n: 1, via: "tx-field" },  // 保留词清单（铺满卡片）
@@ -368,13 +274,12 @@ describe("每一个关掉了焦点环的控件，都要有替代的焦点态", (
 });
 
 describe("界面不许在数据回来之前替用户宣布「你什么都没有」", () => {
-  it("firstRun 等两份数据都到齐（jobs 与 ledger 的初值都是空数组）", () => {
+  it("firstRun 等任务列表到齐（初值是空数组）", () => {
     const shell = read("src/AppShell.tsx");
     const line = shell.match(/const firstRun = [^;]*;/)?.[0] ?? "";
     expect(line).toContain("jobsLoaded");
-    expect(line).toContain("ledgerLoaded");
-    // ledgerLoaded 得真的被置位——只声明不写就是永远 false，整页空态再也出不来了
-    expect(shell).toMatch(/setLedgerLoaded\(true\)/);
+    // jobsLoaded 得真的被置位——只声明不写就是永远 false，整页空态再也出不来了
+    expect(shell).toMatch(/setJobsLoaded\(true\)/);
   });
 
   it("历史页 tab 内那句「暂时没有转录」也要等（它同样是一句断言）", () => {
@@ -382,47 +287,6 @@ describe("界面不许在数据回来之前替用户宣布「你什么都没有�
     // 症状从「整屏说假话」变成「列表区说假话」，一样是先说后改。
     const h = read("src/screens/HistoryPage.tsx");
     expect(h).toMatch(/\{loaded && filtered\.length === 0 &&/);
-  });
-});
-
-describe("价格卡那一行必须真的放得下", () => {
-  const src = read("src/screens/legal/PricingPage.tsx");
-
-  // 2026-09-01：8/31 把充值入口挪到价格数字旁边，9/1 加了第二颗按钮，
-  // 于是 300 + 16 + 388 = 704 > 600 —— flexWrap 把整组**静默**挪到卡片下面，
-  // 在任何窗口宽度下都如此（不是响应式），而注释还写着「价格旁边的入口」。
-  // tsc 不红、测试不红、类型不红，只有真打开页面才看得见。
-  it("card + gap + cta ≤ content（这道加法就是判据本身）", () => {
-    expect(PRICE_ROW.card + PRICE_ROW.gap + PRICE_ROW.cta).toBeLessThanOrEqual(PRICE_ROW.content);
-  });
-
-  it("content 与 article 的实际宽度一致——不然这个常量会悄悄过期", () => {
-    // 少了这条，上面那道加法就变成一句自说自话：把 article 改窄、或把左右内边距调大，
-    // 页面上早就放不下了，而算术仍然成立。
-    // padding 是「上下 clamp　左右 clamp　下」三段，左右是**第二个** clamp——
-    // 只写 clamp\(...\) 会抓到第一个（纵向 72px），算出来的数还是 600、判据照样绿。
-    const m = src.match(/maxWidth:\s*(\d+),\s*margin: "0 auto",\s*padding: "clamp\([^)]*\)\s+clamp\([^,]+,[^,]+,\s*(\d+)px\)/);
-    expect(m, "article 的 maxWidth / padding 写法变了，这条判据要跟着改").not.toBeNull();
-    expect(Number(m![1]) - Number(m![2]) * 2).toBe(PRICE_ROW.content);
-  });
-
-  it("按钮组竖排且真的被 cta 封了顶——否则那道加法算的是另一回事", () => {
-    // 横排时组宽 = 两颗之和（en 是 388，法语更宽），加法里的 cta 就成了一个与渲染无关的数字。
-    // 竖排 + maxWidth 之后组宽 = 最宽的那一颗，且封顶在 cta 上：哪门语言的译文再长
-    // 也只在按钮内部换行，撑不破这一行（法语那条最长，实测两行）。
-    const grp = src.match(/alignSelf: "center",[^}]*\}/)?.[0] ?? "";
-    expect(grp).toContain("maxWidth: PRICE_ROW.cta");
-    expect(grp).toContain('flexDirection: "column"');
-  });
-
-  it("页顶与页底是同一对按钮，共用同一份样式", () => {
-    // 分家的症状不是难看，是**同一页给出两个「我们希望你先做什么」的答案**：
-    // 页底此前只有一颗实心的「充值」，与页顶「免费优先」的主次正好相反。
-    // 数**调用点**不数键名：注释里提一句 `pg.ctaTopup` 就会让裸键名的计数变成 3（刚踩过）。
-    expect((src.match(/M\("pg\.ctaFree"\)/g) ?? []).length).toBe(2);
-    expect((src.match(/M\("pg\.ctaTopup",/g) ?? []).length).toBe(2);
-    expect((src.match(/style=\{ctaPrimary\}/g) ?? []).length).toBe(2);
-    expect((src.match(/style=\{ctaSecondary\}/g) ?? []).length).toBe(2);
   });
 });
 

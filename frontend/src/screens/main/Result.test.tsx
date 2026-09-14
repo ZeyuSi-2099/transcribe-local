@@ -384,14 +384,16 @@ describe("Result review-queue detail (v3)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the 7-day deletion notice, and a read-only state when audio 404s", () => {
+  // 本机版（与线上不同）：线上预告「7 天后自动删除」，本机不自动删，小字改说存放的事实
+  it("shows the local storage note (no auto-deletion), and a read-only state when audio 404s", () => {
     const { container } = renderResult();
-    // 平时：播放器下方预告小字在
-    expect(screen.getByText(/7 天后自动删除|auto-deleted 7 days/)).toBeTruthy();
-    // 录音被删（/audio 404）→ <audio> error → 优雅只读态，预告小字让位
+    // 平时：播放器下方小字在，且不再预告删除
+    expect(screen.getByText(/不会自动删除|never deleted automatically/)).toBeTruthy();
+    expect(screen.queryByText(/7 天/)).toBeNull();
+    // 录音被删（/audio 404）→ <audio> error → 优雅只读态，小字让位
     fireEvent.error(container.querySelector("audio")!);
     expect(screen.getByText(/录音已删除|Audio deleted/)).toBeTruthy();
-    expect(screen.queryByText(/7 天后自动删除|auto-deleted 7 days/)).toBeNull();
+    expect(screen.queryByText(/不会自动删除|never deleted automatically/)).toBeNull();
   });
 
   // 国内慢网：定位后浏览器要等数据（seeking/waiting），此前界面一声不吭、用户以为没点上而连点。

@@ -134,10 +134,8 @@ describe("等分栅格在八门语言下都得站得住", () => {
   // （2026-08-19，量具是临时体检台：一次只渲染一门语言——UILangProvider 会写 <html lang>，
   // 八门同屏时 :lang() 的字体栈会有七门是错的，那样量出来的宽度不作数）。
   // 新增一处就会红：要么改用 minmax(0,1fr)，要么自己在八门下量过再登记进来。
-  const BARE_FR_OK: [string, number][] = [
-    ["src/screens/TopUpModal.tsx", 2],       // 两栏浮窗 + 三档金额
-    ["src/screens/main/Idle.tsx", 1],        // 时长 / 预估费用 两格
-  ];
+  // 本机版：线上登记的两处（充值浮窗、上传页「时长 / 预估费用」两格）随收费一起去掉了
+  const BARE_FR_OK: [string, number][] = [];
   it("裸 1fr 等分栅格没有新增", () => {
     const walk = (dir: string): string[] =>
       readdirSync(join(ROOT, dir)).flatMap((n) => {

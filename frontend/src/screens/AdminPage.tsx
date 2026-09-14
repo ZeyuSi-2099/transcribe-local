@@ -9,19 +9,17 @@ import { fmtClock } from "../lib/format";
 import { langName } from "../lib/langs";
 import {
   getAdminOverview, getAdminBalances, setAdminBalance, refreshAllBalances,
-  getAdminTopups, startAdminRefund, getAdminP3Health, probeP3,
+  getAdminP3Health, probeP3,
   getAdminP3Config, saveAdminP3Config, getAdminExpiries, getAdminHealth,
-  getAdminAlerts, markAlertHandled, sendGrowthReport,
+  getAdminAlerts, markAlertHandled,
   type AdminOverview, type AdminJob, type AdminFailure, type AdminRecent,
-  type AdminMetrics, type EngineState, type AdminBalance, type AdminTopup, type AdminPostprocess,
+  type AdminMetrics, type EngineState, type AdminBalance, type AdminPostprocess,
   type AdminP3Health, type AdminP3Config, type AdminExpiry, type AdminHealth,
   type AdminAlert,
 } from "../lib/api";
 import { usd } from "../lib/pricing";
 import { mono, ellipsis, caret, SectionShell, empty, btnStyle, cardInput, linkBtn, fmtAt } from "./admin/ui";
 import { WorkflowTab } from "./admin/WorkflowTab";
-import { UsersTab } from "./admin/UsersTab";
-import { GrowthTab } from "./admin/GrowthTab";
 
 const ENGINE_ORDER = ["G25F", "ELV", "GEM", "DB", "FA", "XF", "AAI", "SPM", "SNX"];   // G25F=历史任务主轨；ELV=新任务主轨；GEM/AAI/SPM/SNX=新阵容备用/参考轨
 const engineColor = (s: string) =>
@@ -763,145 +761,6 @@ function BalancesSection() {
   );
 }
 
-// ── 充值退款（条款第 4 条：14 天内、只退未消耗部分）─────────────────────────────
-// 可退额一律由后端算：同一套规则前后端各算一遍必然漂移，而这里错一分钱就是真金白银。
-// 发起只是「调 provider 退款 API + 占住额度」，余额要等 provider 的退款 webhook 回来才扣，
-// 所以这里退成功后不刷新余额数字——刷了也还是旧值，反而让人以为没生效。
-const TOPUP_COLS = "1.1fr 1fr 1fr 1fr 1.4fr";
-
-function RefundRow({ t, email, onDone }: { t: AdminTopup; email: string; onDone: () => void }) {
-  const L = useL();
-  const [amount, setAmount] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const refundable = t.refundableCents;
-  const dollars = (cents: number) => usd(cents / 100);   // usd() 收美元数；账本一律以分记，展示前换算
-
-  const submit = async () => {
-    const cents = Math.round(parseFloat(amount || "0") * 100);
-    if (!(cents > 0) || cents > refundable) {
-      setMsg(L(`请输入 0 到 ${dollars(refundable)} 之间的金额`, `Enter an amount between 0 and ${dollars(refundable)}`));
-      return;
-    }
-    setBusy(true);
-    setMsg(null);
-    try {
-      await startAdminRefund(email, t.id, cents);
-      setMsg(L("已向支付渠道发起，余额待回执到账后扣减", "Sent to the payment provider; balance updates on callback"));
-      setAmount("");
-      onDone();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : L("发起失败", "Failed"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: TOPUP_COLS, gap: space.s4, padding: `${space.s3}px ${space.s5}px`, borderTop: `1px solid ${semantic.border.subtle}`, alignItems: "center" }}>
-      <div style={mono(12)}>{dollars(t.amountCents)}</div>
-      <div style={{ ...mono(11), color: semantic.text.muted }}>
-        {t.isBonus ? L("赠送", "Bonus") : (t.source || "—")}
-      </div>
-      <div style={{ ...mono(11), color: t.ageDays > 14 ? semantic.text.muted : semantic.text.secondary }}>
-        {L(`${t.ageDays} 天前`, `${t.ageDays}d ago`)}
-      </div>
-      <div style={{ ...mono(12), color: refundable > 0 ? semantic.success.text : semantic.text.muted }}>
-        {dollars(refundable)}
-        {t.refundedCents > 0 && (
-          <span style={{ ...mono(10), color: semantic.text.muted }}> · {L("已退", "refunded")} {dollars(t.refundedCents)}</span>
-        )}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {refundable > 0 ? (
-          <div style={{ display: "flex", gap: space.s2, alignItems: "center" }}>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={dollars(refundable).replace("$", "")}
-              aria-label={L("退款金额", "Refund amount")} style={{ ...cardInput, width: 72 }} />
-            <button className="tx-focus" disabled={busy} onClick={submit} style={btnStyle(false)}>
-              {busy ? L("发起中…", "Sending…") : L("退款", "Refund")}
-            </button>
-          </div>
-        ) : (
-          <span style={{ ...mono(11), color: semantic.text.muted }}>
-            {t.isBonus ? L("赠送额度，不退现金", "Bonus credit — no cash back")
-              : t.ageDays > 14 ? L("超出 14 天窗口", "Past the 14-day window")
-                : L("无可退余额", "Nothing left to refund")}
-          </span>
-        )}
-        {msg && <span style={{ ...mono(10), color: semantic.text.secondary }}>{msg}</span>}
-      </div>
-    </div>
-  );
-}
-
-function RefundsSection() {
-  const L = useL();
-  const [email, setEmail] = useState("");
-  const [data, setData] = useState<{ topups: AdminTopup[]; balanceCents: number } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const loadedFor = useRef("");     // 当前这份 data 是谁的
-
-  const load = useCallback(async (target: string) => {
-    if (!target.trim()) return;
-    setBusy(true);
-    setErr(null);
-    // 换了查的人先清空——不清就会把上一个人的充值记录挂在新邮箱下面显示。
-    // **只在换人时清**：退款成功后也会走这里刷新，那时清空会把「已发起」那行提示一并抹掉。
-    if (loadedFor.current !== target.trim()) setData(null);
-    loadedFor.current = target.trim();
-    try {
-      setData(await getAdminTopups(target.trim()));
-    } catch {
-      setData(null);
-      setErr(L("查不到该用户的充值记录", "No top-ups found for that user"));
-    } finally {
-      setBusy(false);
-    }
-  }, [L]);
-
-  return (
-    <SectionShell title={L("充值退款", "Top-up refunds")}>
-      <div style={{ padding: space.s4, display: "flex", gap: space.s3, alignItems: "center" }}>
-        <input value={email} onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") void load(email); }}
-          placeholder={L("用户邮箱", "User email")} aria-label={L("用户邮箱", "User email")}
-          style={{ ...cardInput, width: 260 }} />
-        <button className="tx-focus" disabled={busy} onClick={() => void load(email)} style={btnStyle(true)}>
-          {busy ? L("查询中…", "Loading…") : L("查询", "Look up")}
-        </button>
-        {data && (
-          <span style={{ ...mono(11), color: semantic.text.muted }}>
-            {L("当前余额", "Balance")} {usd(data.balanceCents / 100)}
-          </span>
-        )}
-      </div>
-      {err && <div style={{ ...mono(11), color: semantic.danger.text, padding: `0 ${space.s5}px ${space.s4}px` }}>{err}</div>}
-      {data && (data.topups.length === 0
-        ? empty(L("该用户没有充值记录", "No top-ups for this user"))
-        : (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: TOPUP_COLS, gap: space.s4, padding: `${space.s3}px ${space.s5}px`, borderTop: `1px solid ${semantic.border.default}`, background: semantic.surface.page, ...type.label }}>
-              <div>{L("充值额", "Amount")}</div>
-              <div>{L("来源", "Source")}</div>
-              <div>{L("时间", "When")}</div>
-              <div>{L("可退", "Refundable")}</div>
-              <div>{L("操作", "Action")}</div>
-            </div>
-            {data.topups.map((t) => (
-              <RefundRow key={t.id} t={t} email={email.trim()} onDone={() => void load(email)} />
-            ))}
-            <div style={{ ...mono(10), color: semantic.text.muted, padding: `${space.s3}px ${space.s5}px` }}>
-              {L("各行可退额都受同一份可用余额约束，不能相加；退掉一笔，其余各笔会随之下降。",
-                 "Each row's refundable amount is capped by the same available balance — they don't add up; refunding one lowers the rest.")}
-            </div>
-          </>
-        ))}
-    </SectionShell>
-  );
-}
-
-
 // 后处理板块列宽：文件 / 用户 / 步骤 / 状态 / 价 / 时间
 const PP_COLS = "minmax(0,2.2fr) minmax(0,1.2fr) minmax(0,1.6fr) minmax(0,1fr) 5em 5em 6em";
 
@@ -1039,12 +898,7 @@ function AlertsSection() {
     try { await markAlertHandled(id); load(); } catch { /* 失败就保持原样，下次轮询会纠正 */ }
     setBusy(0);
   };
-  // 「现在发一份增长周报」：验收不用等周一。发完落在这张列表里（fyi 档），所以发完就刷新
-  const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
-  const sendReport = async () => {
-    setReportState("sending");
-    try { await sendGrowthReport(); setReportState("sent"); load(); } catch { setReportState("failed"); }
-  };
+  // 本机版：没有「发一份增长周报」（本机不发邮件、没有增长口径）
 
   const tierLabel = (t: string) => (
     t === "act" ? L("要动手", "Act") : t === "watch" ? L("要留意", "Watch") : L("知会", "FYI"));
@@ -1054,12 +908,6 @@ function AlertsSection() {
       title={L("告警", "Alerts")}
       action={
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <button className="tx-focus" disabled={reportState === "sending"} onClick={sendReport} style={btnStyle(true)}>
-            {reportState === "sending" ? L("发送中…", "Sending…")
-              : reportState === "sent" ? L("周报已发到邮箱", "Report sent")
-                : reportState === "failed" ? L("周报发送失败", "Report failed")
-                  : L("发一份增长周报", "Send growth report")}
-          </button>
           {/* 「只看未处理」不限时间窗（2026-09-03 生产实见：待办条亮着，列表默认 7 天却说没有）——
               勾上之后时间按钮就没有意义，藏掉，别让人以为它还在过滤 */}
           {!onlyTodo && [7, 30, 180].map((d) => (
@@ -1444,7 +1292,8 @@ function TaskFlow({ data }: { data: AdminOverview }) {
 }
 
 // 增长放在用户前面（Growth 单 §四 ②）：它是「人的视角」的汇总版——先看数，要看人再点进用户
-const TAGS = ["live", "workflow", "resource", "growth", "user"] as const;
+// 本机版：去掉「增长」「用户」（连同退款）——本机单用户、不收费
+const TAGS = ["live", "workflow", "resource"] as const;
 type Tag = typeof TAGS[number];
 
 export function AdminPage() {
@@ -1470,14 +1319,12 @@ export function AdminPage() {
     live: L("运行", "Live"),
     workflow: L("工作流", "Workflow"),
     resource: L("资源", "Resources"),
-    growth: L("增长", "Growth"),
-    user: L("用户", "Users"),
   };
 
   return (
     <div className="tx-scroll" style={{ flex: 1, padding: layout.pagePad, overflowY: "auto", minHeight: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: space.s4 }}>
-        <h1 style={{ ...type.h1, margin: 0 }}>{L("运营驾驶舱", "Operations")}</h1>
+        <h1 style={{ ...type.h1, margin: 0 }}>{L("运行面板", "System status")}</h1>
         <span style={{ ...mono(11), color: err ? semantic.danger.text : semantic.text.muted }}>
           {err ? L("连接异常 · 重试中", "Connection error · retrying") : L("每 5 秒自动刷新 · 点任务行看明细", "Auto-refresh 5s · click a row for detail")}
         </span>
@@ -1533,16 +1380,7 @@ export function AdminPage() {
         </>
       )}
 
-      {tag === "growth" && <GrowthTab />}
 
-      {/* 用户 Tag：列表/下钻在上，充值退款在下——退款是「对某一笔充值动手」，
-          得先找到人才用得上，所以它在下面而不是上面 */}
-      {tag === "user" && (
-        <>
-          <UsersTab />
-          <RefundsSection />
-        </>
-      )}
     </div>
   );
 }

@@ -5,11 +5,10 @@ import { Button } from "./components/Button";
 import { useL } from "./lib/i18n";
 import { semantic, layout, radius, shadow, type as ttype } from "./styles/tokens";
 import { useFlow, etaMinutes, observedClimb } from "./lib/flow";
-import { rateFor, MIN_TOPUP } from "./lib/pricing";
 import { fmtClock, toSec } from "./lib/format";
-import { getLedger, getMe, getPendingTopups, getPostprocess, getResult, getReview, getReviewState, listJobs, retryJob, topup as topupApi, markInvoiced, listGlossaries, createGlossary, updateGlossary, deleteGlossary, type Glossary, type JobRow, type LedgerRow, type Me, type PendingTopup, type PostprocessStatus, type ReviewStateBlob, type TranscriptRow } from "./lib/api";
+import { getPostprocess, getResult, getReview, getReviewState, listJobs, retryJob, listGlossaries, createGlossary, updateGlossary, deleteGlossary, type Glossary, type JobRow, type Me, type PostprocessStatus, type ReviewStateBlob, type TranscriptRow } from "./lib/api";
 import type { ReviewItem } from "./lib/reviewData";
-import type { HistoryItem, BillingLine, TopupRecord } from "./lib/sampleData";
+import type { HistoryItem } from "./lib/sampleData";
 import { Sidebar } from "./components/Sidebar";
 import { MainPage } from "./screens/main/MainPage";
 import { HistoryPage } from "./screens/HistoryPage";
@@ -18,16 +17,16 @@ import { GlossaryPage } from "./screens/main/GlossaryPage";
 import { PostprocessPage } from "./screens/main/PostprocessPage";
 import { Result } from "./screens/main/Result";
 import { DetailSkeleton } from "./screens/main/DetailSkeleton";
-import { BillingModal } from "./screens/BillingModal";
 import { SettingsModal } from "./screens/SettingsModal";
-import { TopUpModal } from "./screens/TopUpModal";
 import { NarrowScreenNotice, useNarrowGate } from "./screens/NarrowScreenNotice";
+
+// 本机版（与线上不同）：去掉余额、免费额度、充值与账单浮窗、在路上的充值轮询、推荐、退出登录。
+// 本机单用户、不收费，音频和稿子不自动删（没有「超 30 天过期」）。其余流程与线上逐行一致。
 
 export type Page = "new" | "history" | "detail" | "glossary" | "postprocess" | "admin";
 
 interface AppShellProps {
   me: Me | null;
-  onLogout: () => void;
 }
 
 // ISO 时间 → 列表显示用短日期
@@ -38,26 +37,22 @@ const fmtDate = (iso: string) => {
   return { zh: md, en: md };
 };
 
-const RESULT_TTL_DAYS = 30;   // R2 result/review 生命周期：30 天后内容被删
 const jobToItem = (j: JobRow): HistoryItem & { id: string } => ({
   id: j.id,
   n: j.fileName ?? "未命名音频",
   d: fmtDate(j.createdAt),
   dur: j.durationSec != null ? fmtClock(j.durationSec) : "—",
-  // 花费认后端下发的真实值（账本扣费 / 在途冻结额），不在前端拿单价重算——每单费率是上传时的快照
-  cost: (j.costCents ?? 0) / 100,
+  cost: 0,   // 本机不收费
   lang: j.lang ?? "zh",
   st: j.status === "done" ? "done" : j.status === "failed" ? "failed" : j.status === "queued" ? "queued" : "processing",
   prog: j.progress,
-  // 完成且超 30 天 → 内容已被 R2 生命周期删除，标过期、不可点开（点开会拿不到结果）
-  expired: j.status === "done" && Date.now() - new Date(j.createdAt).getTime() > RESULT_TTL_DAYS * 86400_000,
+  expired: false,   // 本机不自动删内容，没有过期
   error: j.error,   // 失败原因（后端脱敏话术），失败行给用户展示
   pp: j.postprocess ?? null,   // 后处理状态（行内 caption 三态）
 });
 
 export function AppShell({
   me,
-  onLogout,
 }: AppShellProps) {
   useFullHeightScreen();   // 应用是满屏外壳，不跟着文档滚（公开站相反，见 global.css）
   const L = useL();
@@ -74,93 +69,41 @@ export function AppShell({
     else setPage(next);
   }, [page]);
   const signedIn = me != null;
-  const [balance, setBalance] = useState((me?.balanceCents ?? 0) / 100); // 美元
-  const [showTopUp, setShowTopUp] = useState(false);
-  const [topUpPrefill, setTopUpPrefill] = useState<number | undefined>(undefined); // 软墙缺口预填
   const [showSettings, setShowSettings] = useState(false); // 设置浮窗（不是页面）
-  // 术语库（每用户多本；登录态走后端持久化）。selectedGlossaryId = 下次转录默认用哪本（localStorage 记住上次选择）
+  // 术语库（多本，后端持久化）。selectedGlossaryId = 下次转录默认用哪本（localStorage 记住上次选择）
   // null = 还没取回来。**不能用空数组表示未知**：术语库页会据此摆出「还没有术语库」
   // 的空态屏（连「新建第一本」的按钮一起），有三本库的人先看到它、再翻成列表。
   const [glossaries, setGlossaries] = useState<Glossary[] | null>(null);
   const [selectedGlossaryId, setSelectedGlossaryId] = useState<string | null>(
     () => localStorage.getItem("glossaryId"));
-  // 免费额度（定价 V2 §2）：软墙/预估要算入免费抵扣；limited=IP 闸提示
-  const [free, setFree] = useState(me?.free ?? { grantedMinutes: 0, leftSeconds: 0, limited: false });
-  const [referral, setReferral] = useState(me?.referral);
-  const [showBilling, setShowBilling] = useState(false); // 账单浮窗（不是页面）
-  // 账户数据（后端为准）：任务列表 + 账本
   const [jobs, setJobs] = useState<JobRow[]>([]);
   // 「任务列表拉回来了没有」——只服务上传页左栏的首帧布局（见 Idle 里 twoCol 的注释）。
   // 分不清「还不知道」与「确实一份都没有」的话，有历史的老用户每次进上传页都会先看到
   // 单栏居中、再跳成两栏。⚠️ 只在**首次**拉回时置位，之后的轮询不再动它。
   const [jobsLoaded, setJobsLoaded] = useState(false);
-  const [ledger, setLedger] = useState<LedgerRow[]>([]);
-  const [ledgerLoaded, setLedgerLoaded] = useState(false);
   // 当前这次转录的展示信息（开始时记下，flow 非 idle 时它就是「我的转录」列表里的实时一行）
-  const [live, setLive] = useState<{ name: string; lang: string; durationSec: number | null; freeSeconds: number } | null>(null);
+  const [live, setLive] = useState<{ name: string; lang: string; durationSec: number | null } | null>(null);
   // 详情页看的是哪条："live"=本次转录；历史条目 = 已加载的真实数据
   const [detailSrc, setDetailSrc] = useState<"live" | { item: HistoryItem & { id: string }; segments: TranscriptRow[]; review: ReviewItem[]; rs: { s: ReviewStateBlob } | null; pp: { s: PostprocessStatus | null } | null } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const flow = useFlow();
 
-  // 刷新账户数据（余额/任务/账本）——登录态才有得刷
+  // 刷新任务列表与术语库
   const refreshAccount = useCallback(() => {
     if (!signedIn) return;
-    getMe().then((m) => {
-      setBalance(m.balanceCents / 100);
-      if (m.free) setFree(m.free);
-      if (m.referral) setReferral(m.referral);
-    }).catch(() => {});
     listJobs().then((j) => { setJobs(j); setJobsLoaded(true); }).catch(() => {});
-    getLedger().then((l) => { setLedger(l); setLedgerLoaded(true); }).catch(() => {});
     listGlossaries().then((gs) => {
       setGlossaries(gs);
       // 默认选中：localStorage 上次**显式**选过的那本（若还在）→ 否则「不使用」。
-      // ⚠️ **绝不替用户挑一本**（2026-08-28 前是回落 `gs[0]`＝最近更新那本）：挂错库不报错，
-      // 它会把近音词悄悄拽向那本库所属行业的写法，界面上还显示成【术语库】证据——
-      // 与 vendor 那次「用户一本库都没选却吃到别人的行业词表」是同一种错，只是这次是我们自己选的。
+      // ⚠️ **绝不替用户挑一本**：挂错库不报错，它会把近音词悄悄拽向那本库所属行业的写法。
       setSelectedGlossaryId((cur) => (cur && gs.some((g) => g.id === cur)) ? cur : null);
     // 取失败也要落地成 []：**未知不能是永久的**，否则术语库页会一直卡在骨架上
     }).catch(() => setGlossaries([]));
   }, [signedIn]);
   useEffect(() => { refreshAccount(); }, [refreshAccount]);
 
-  // ── 在路上的充值（2026-09-06）：微信 / 支付宝付完款 Paddle 要几分钟才确认，此前这几分钟界面上什么都不说，
-  // 客户回到应用看到余额 0 以为没付成。现在每 5 秒问一次后端（后端顺手向 Paddle 对账），
-  // 有在路上的钱就显示「入账中」，消失那一刻＝到账：刷新余额、显示几秒「已到账」。
-  // 轮询只在「有在路上的」或「付款页刚标记过付款成功」时持续，最多 15 分钟，其余时候只在进应用时问一次。
-  const [pendingTopups, setPendingTopups] = useState<PendingTopup[]>([]);
-  const [justCredited, setJustCredited] = useState<number | null>(null);
-  const pendingRef = useRef<PendingTopup[]>([]);
-  useEffect(() => {
-    if (!signedIn) return;
-    let stopped = false;
-    let timer = 0;
-    const started = Date.now();
-    const tick = async () => {
-      let items: PendingTopup[] = [];
-      try { const r = await getPendingTopups(); items = Array.isArray(r?.items) ? r.items : []; } catch { return; }   // 未登录 / 断网 / 老后端：不再问
-      if (stopped) return;
-      const gone = pendingRef.current.filter((p) => !items.some((i) => i.txnId === p.txnId));
-      pendingRef.current = items;
-      setPendingTopups(items);
-      if (gone.length) {
-        setJustCredited(gone.reduce((s, g) => s + g.amountCents, 0));
-        refreshAccount();
-        window.setTimeout(() => setJustCredited(null), 6000);
-        try { localStorage.removeItem("tx_topup_paid"); } catch { /* 无痕等情况忽略 */ }
-      }
-      let paidFlag = 0;
-      try { paidFlag = Number(localStorage.getItem("tx_topup_paid") || 0); } catch { /* ignore */ }
-      const keep = items.length > 0 || (paidFlag > 0 && Date.now() - paidFlag < 15 * 60 * 1000);
-      if (keep && Date.now() - started < 15 * 60 * 1000) timer = window.setTimeout(tick, 5000);
-    };
-    tick();
-    return () => { stopped = true; window.clearTimeout(timer); };
-  }, [signedIn, refreshAccount]);
-
-  // 术语库 CRUD：登录态写后端持久化后刷新本地列表（别信本地态，看后端读回——历史踩过坑）
+  // 术语库 CRUD：写后端后刷新本地列表（别信本地态，看后端读回——历史踩过坑）
   const reloadGlossaries = useCallback(async () => {
     const gs = await listGlossaries();
     setGlossaries(gs);
@@ -185,20 +128,16 @@ export function AppShell({
     if (id) localStorage.setItem("glossaryId", id); else localStorage.removeItem("glossaryId");
   }, []);
 
-
-  // 转录完成：后端已按真实时长结账（worker），前端刷新余额与账本即可
+  // 转录结束：刷新列表
   useEffect(() => {
     if (flow.state !== "done" && flow.state !== "error") return;
     refreshAccount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow.state]);
 
-  // 上传落库那一刻**强制重拉一次**账户数据（列表 + 账本 + 余额）。
-  // ⚠️ 这条不是锦上添花，它防的是**重复付费**（2026-08-27 巡检里就这么白交了一遍俄语单）：
-  // 提交后页面直接跳「我的转录」，而 `page` 那条刷新在**上传还没传完**时就跑了，
-  // 拉回来的是提交之前的快照——刚交的那单不在列表里，看上去就像"没提交成功"，于是再交一遍。
-  // jobId 是「后端已经收下这一单」的唯一确证，所以刷新挂在它身上，不挂在点击或页面切换上。
-  // 账本一并刷：预扣那一笔同样是这一刻才产生的（账单浮窗少两笔是同一个成因）。
+  // 上传落库那一刻**强制重拉一次**列表。提交后页面直接跳「我的转录」，而 `page` 那条刷新在
+  // **上传还没传完**时就跑了，拉回来的是提交之前的快照——刚交的那单不在列表里，看上去就像
+  // 「没提交成功」，于是再交一遍。jobId 是「后端已经收下这一单」的唯一确证，所以刷新挂在它身上。
   useEffect(() => {
     if (!flow.jobId) return;
     refreshAccount();
@@ -218,24 +157,14 @@ export function AppShell({
     return () => clearInterval(t);
   }, [signedIn, hasActiveJob, flowActive]);
   // 进历史页刷新一次列表：后处理在详情页发起/完成时列表快照已旧，且旧快照里无在途行
-  // 不会触发上面的轮询——不刷会看不到「✦ 已加工」caption（2026-07-24 穿测踩中）
+  // 不会触发上面的轮询——不刷会看不到「✦ 已加工」caption
   useEffect(() => {
     if (signedIn && page === "history") listJobs().then(setJobs).catch(() => {});
   }, [signedIn, page]);
 
-  // suggested = 软墙缺口金额（来自上传卡「先充值 →」），预填进充值弹窗。
-  // 门①（按单即传即付）：单笔支付最低 $10——缺口不足 $10 的按 $10 预填，差额留在余额
-  const openTopUp = (suggested?: number) => {
-    setTopUpPrefill(suggested != null ? Math.max(Math.ceil(suggested), MIN_TOPUP) : undefined);
-    setShowTopUp(true);
-  };
-
-  // 上传 + 开始（已过软墙）：记下本次任务、开跑、直接进「我的转录」
+  // 上传 + 开始：记下本次任务、开跑、直接进「我的转录」
   const startJob = (file: File, lang: string, durationSec: number | null) => {
-    // 免费秒在上传那一刻捕获（me 随后刷新会扣减，之后再算就错基了）；与后端预扣同口径
-    const freeSeconds = durationSec != null
-      ? Math.min(free.leftSeconds, durationSec) : 0;
-    setLive({ name: file.name, lang, durationSec, freeSeconds });
+    setLive({ name: file.name, lang, durationSec });
     flow.start(file, lang, durationSec, selectedGlossaryId);
     setPage("history");
   };
@@ -245,12 +174,7 @@ export function AppShell({
     n: live.name,
     d: { zh: "刚刚", en: "Just now" },
     dur: live.durationSec != null ? fmtClock(live.durationSec) : "—",
-    // 刚上传这一行后端花费还没轮询回来，本地按当前费率估——同一时刻上传，估价必等于快照价
-    // （先抵上传时捕获的免费秒，剩余按单价，与后端预扣同口径。
-    //  2026-08-01 生产实测踩坑：不减免费秒会把全免费的单短暂显示成全价，刷新后才归零）
-    cost: live.durationSec != null
-      ? (Math.max(0, live.durationSec - live.freeSeconds) / 60) * rateFor(live.lang)
-      : 0,
+    cost: 0,
     lang: live.lang,
     st: flow.state === "done" ? "done" : flow.state === "error" ? "failed" : flow.state === "uploading" ? "uploading" : flow.state === "queued" ? "queued" : "processing",
     prog: flow.displayProgress,
@@ -264,7 +188,7 @@ export function AppShell({
 
   // 历史列表（后端任务，进行中的本次任务由 liveRow 顶替避免重复）。
   // running 行的进度不能裸用后端原值（一根匀速条按时间爬，后端 progress 是 Phase 锚点会冻住）——
-  // 「可离开」邀请用户刷新/换设备回来，回来必须还在爬：按 observedClimb 从首次观察起算。
+  // 「可离开」邀请用户刷新回来，回来必须还在爬：按 observedClimb 从首次观察起算。
   const climbSeenRef = useRef(new Map<string, { since: number }>());
   const historyItems: (HistoryItem & { id: string })[] = jobs
     .filter((j) => !(liveRow && j.id === flow.jobId))
@@ -281,32 +205,13 @@ export function AppShell({
 
   // 点历史里的已完成任务 → 拉真实文稿与复核清单
   const openHistoryItem = async (item: HistoryItem & { id: string }) => {
-    // ⚠️ **先清空上一单**：不清的话 detailProps 仍是上一单的数据，而渲染分支是
-    // 「有 detailProps 就渲染 Result，否则才看 loading」——于是点开 B 会先原样显示
-    // 半秒到一秒的 A 详情页，再跳成 B（2026-08-22 Duner 实测）。清空后走骨架屏。
+    // ⚠️ **先清空上一单**：不清的话点开 B 会先原样显示半秒 A 的详情页，再跳成 B。清空后走骨架屏。
     setDetailSrc(null);
     setDetailLoading(true);
     setPage("detail");
     try {
-      // getReview 失败不吞成 []（那会带着空清单开详情=「放心导出」伪装）：让它抛进下面的
-      // catch，本次点开失败弹回列表，用户重点一次即重试。复核真不存在时后端返 200+[]。
-      // ⚠️ **复核决策要跟稿子一起取回来**（2026-08-22 Duner 连拍四张实见）。
-      // 决策留在详情页里自己取的话，右栏会先按「一条决策都没有」渲染一遍：
-      // 一份早就复核完的稿子先摆「17 项待确认」+ 后处理「还差 17 处确认」，
-      // 三秒后才翻成「已全部确认」。**同一个毛病之前在这条路上出过一次**
-      // （点开 B 先看到 A 的详情），根因都是「页面先开、数据后到」。
-      // ⚠️ **取不到不许当成「没有」**（2026-08-23）：`.catch(() => null)` 曾把
-      // 「问不出来」和「问过了、确实没有」写成同一个值，于是详情页从一本空账本开工，
-      // 800ms 后照「原样放回去」的老规矩，把这本空的写回服务端——**盖掉用户已经确认过的
-      // 全部决策**。所以这里包一层 `{ s }`：外层 null = 没问出来，详情页据此自己再去问一次
-      // （另一半保险在 Result 里：不知道服务端有什么就一个字都不写）。
-      // 与另外两个仍然不同：稿子和复核清单取不到必须弹回列表，带着空清单进详情等于
-      // 「放心导出」伪装；决策取不到不该挡住看稿。
-      // 加工状态也一起取：它**不依赖**稿子和复核清单，串在后面跑纯属白等——
-      // 实测「点开一篇转录到右栏安定」5.5 秒里有 1.8 秒是它在排队（2026-08-22 巡检）。
-      // ⚠️ 包一层 `{ s }`：取到「没有加工任务」是 null，而**没问出来**也得能表示，
-      // 两者不能混——混了的话一次 500 就会让一篇加工完的稿子摆出「开始加工」的样子。
-      // 外层 null = 没问出来 → 详情页自己去问（＝改动前的行为）。
+      // 稿子、复核清单、复核决策、加工状态一起取（原委见线上同处注释）：
+      // 稿子和清单取不到必须弹回列表；决策与加工状态包一层 `{ s }`，外层 null = 没问出来、详情页自己再问。
       const [segments, review, rs, pp] = await Promise.all([
         getResult(item.id),
         getReview(item.id),
@@ -322,49 +227,7 @@ export function AppShell({
     }
   };
 
-  // 充值：登录态走后端（开发模式直充 / Stripe 跳支付页）；演示模式本地加
-  const doTopup = async (amt: number) => {
-    if (!signedIn) {
-      setBalance((b) => b + amt);
-      setShowTopUp(false); setTopUpPrefill(undefined);
-      return;
-    }
-    try {
-      const r = await topupApi(Math.round(amt * 100));
-      if (r.checkoutUrl) { window.location.href = r.checkoutUrl; return; }
-      if (r.balanceCents != null) setBalance(r.balanceCents / 100);
-      getLedger().then(setLedger).catch(() => {});
-    } catch { /* 失败保持弹窗关闭前的余额，不乱加 */ }
-    setShowTopUp(false); setTopUpPrefill(undefined);
-  };
-
-  // 账本 → 账单浮窗的两个列表
-  const charges: BillingLine[] = ledger
-    .filter((l) => l.kind === "charge" || l.kind === "pp_charge")
-    .map((l) => ({
-      n: (l.kind === "pp_charge" ? "✦ " : "") + (l.fileName ?? "未命名音频"),
-      d: fmtDate(l.createdAt),
-      dur: l.durationSec != null ? fmtClock(l.durationSec) : "—",
-      lang: l.lang ?? "zh",
-      cost: Math.abs(l.amountCents) / 100,
-    }));
-  // 退款要跟着那笔充值一起露出来（refundedCents）。此前这里只取 topup、退款行整条丢掉，
-  // 于是一笔被退回的充值在账单上仍写着「成功」并带着「开票」按钮——用户只看到余额少了、
-  // 不知道为什么，而那笔已退的钱还能开票（2026-08-22 巡检实见）。
-  // 推荐礼金（kind='gift'）也进这张表：它加的是同一个余额，用户在「充值」页找不到会以为没到账。
-  // 但它不是你付的钱：不开票、不退款，行上标成礼金（BillingModal 按 gift 标志分开画）。
-  const topups: TopupRecord[] = [
-    // 在路上的排最前：它还不是账本里的一笔，只是告诉人「有钱正在到」
-    ...pendingTopups.map((p) => ({ id: `pending:${p.txnId}`, d: fmtDate(p.createdAt), amount: p.amountCents / 100, pending: true })),
-    ...ledger
-      .filter((l) => l.kind === "topup" || l.kind === "gift")
-      .map((l) => ({ id: String(l.id), d: fmtDate(l.createdAt), amount: l.amountCents / 100,
-                     invoiced: l.invoiced, refunded: (l.refundedCents ?? 0) / 100, gift: l.kind === "gift" })),
-  ];
-
-  // 登录后浏览器标签页的标题一直是营销站那句英文（`document.title` 进应用后不再更新），
-  // 开着好几个标签页时分不清哪个是应用（2026-08-22 巡检）。
-  // 文案直接抄侧边栏那几条，别另起一套——同一个东西两个名字比没名字更糟。
+  // 浏览器标签页标题：文案直接抄侧边栏那几条，别另起一套——同一个东西两个名字比没名字更糟。
   useEffect(() => {
     const name: Record<Page, string> = {
       new: L("新建转录", "New transcription"),
@@ -372,18 +235,14 @@ export function AppShell({
       detail: detailSrc && detailSrc !== "live" ? detailSrc.item.n : L("转录详情", "Transcript"),
       glossary: L("术语库", "Glossary"),
       postprocess: L("脱敏规则", "Redaction rules"),
-      admin: L("运营驾驶舱", "Operations"),
+      admin: L("运行面板", "System status"),
     };
-    document.title = `${name[page]} · Transcribe.`;
+    document.title = `${name[page]} · Transcribe Local`;
   }, [page, detailSrc, L]);
 
-  // ⚠️ **必须先确认拉回来了**（2026-09-01）：`jobs`/`ledger` 的初值都是 `[]`，
-  // 而「空数组」在这里被当成断言用——「你还什么都没有」。不加载完就下这个断言的话，
-  // 刚登录那半秒里点开「我的转录」看到的是「这里还很安静」+「上传第一个文件 →」，
-  // 半秒后整页换成一张有几十行的列表。这是上传页那次横跳的同一个毛病：
-  // **界面在猜一个还没回来的事实**，而猜错的代价是我们对用户说了句假话。
-  // 同一条思路已经在术语库整页与后处理配置页用过（都是 `loaded &&` 之后才敢摆空态）。
-  const firstRun = signedIn ? jobsLoaded && ledgerLoaded && ledger.length === 0 && jobs.length === 0 : true;
+  // ⚠️ **必须先确认拉回来了**：`jobs` 初值是 `[]`，而「空数组」在这里被当成断言用——「你还什么都没有」。
+  // 不加载完就下这个断言的话，刚打开那半秒里点「我的转录」会先看到空态、再换成一张列表。
+  const firstRun = signedIn ? jobsLoaded && jobs.length === 0 : true;
 
   // 详情页要渲染的 Result props
   const detailProps = (() => {
@@ -433,38 +292,22 @@ export function AppShell({
     >
       <Sidebar
         active={page}
-        email={me?.email ?? null}
         onNav={(id) => go(id as Page)}
-        onOpenBilling={() => { setShowBilling(true); refreshAccount(); }}   /* 打开即重拉：账本只在挂载/跑完时取过，中间新增的笔数看不见 */
         onOpenSettings={() => setShowSettings(true)}
-        onLogout={onLogout}
-        balance={balance}
-        pendingTopupCents={pendingTopups.reduce((s, p) => s + p.amountCents, 0)}
-        justCreditedCents={justCredited}
-        freeLeftSeconds={free.leftSeconds}
         glossaryCount={glossaries?.length}
         isAdmin={me?.isAdmin}
       />
 
-      {/* 右侧内容区：各页面在此纵向铺满。
-          横向 auto 是**窄窗口的兜底**：各页面用固定像素栅格（上传页 468px 卡、术语库 220+300 两侧栏、
-          详情页 360px 复核栏），窗口比它们窄时原本会被这里的 overflow:hidden 裁掉——既看不见也
-          滑不出来。改成可横滑后放不下就左右滑，这是通行做法（桌面窗口拖窄不弹任何提示，见
-          NarrowScreenNotice 的判据说明）。纵向仍交给各页面自己的滚动容器。
-          历史页不靠这层：它的表格自己横滑，表头 sticky、侧栏与筛选 tab 不跟着移。 */}
+      {/* 右侧内容区：各页面在此纵向铺满。横向 auto 是窄窗口的兜底（原委见线上同处注释）。 */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowX: "auto", overflowY: "hidden", position: "relative" }}>
       {page === "new" && (
         <MainPage
           flow={flow}
-          balance={balance}
-          onTopUp={openTopUp}
           onStartJob={startJob}
           glossaries={glossaries ?? []}
           selectedGlossaryId={selectedGlossaryId}
           onSelectGlossary={onSelectGlossary}
           onOpenGlossary={() => go("glossary")}
-          freeLeftSeconds={free.leftSeconds}
-          freeLimited={free.limited}
           recent={jobsLoaded ? historyItems : undefined}
           onOpenRecent={(it) => { void openHistoryItem(it as HistoryItem & { id: string }); }}
           onOpenHistory={() => go("history")}
@@ -483,9 +326,7 @@ export function AppShell({
           onRetry={async (f) => {
             await retryJob((f as HistoryItem & { id: string }).id);
             // 新单一进列表，上面那个「有在途任务就轮询」的 effect 自己会起来跑进度。
-            // 不用 useFlow 接管：它只跟最后一次**上传**，而重试没有上传这一步。
             setJobs(await listJobs());
-            refreshAccount();   // 重试要重新预扣，余额得跟着变
           }}
         />
       )}
@@ -505,8 +346,7 @@ export function AppShell({
 
       {page === "detail" && (detailProps ? (
         <div className="tx-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: layout.pagePad, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          {/* key=任务 id：切换任务时强制重挂载 Result，重置其全部内部态（全文 segs、复核确认/删除等），
-              否则 React 复用同一实例，旧任务的全文会残留到新任务详情页 */}
+          {/* key=任务 id：切换任务时强制重挂载 Result，重置其全部内部态 */}
           <Result key={detailProps.jobId ?? "live"} onBack={() => go("history")} onPostprocessDone={refreshAccount} {...detailProps} />
         </div>
       ) : detailLoading ? (
@@ -528,43 +368,12 @@ export function AppShell({
         />
       )}
 
-      <BillingModal
-        open={showBilling}
-        onClose={() => setShowBilling(false)}
-        balance={balance}
-        onTopUp={() => { setShowBilling(false); openTopUp(); }}
-        empty={firstRun && charges.length === 0 && topups.length === 0}
-        charges={charges}
-        topups={topups}
-        onInvoice={signedIn ? (ids) => {
-          void markInvoiced(ids.map(Number)).then(() => getLedger().then(setLedger).catch(() => {}));
-        } : undefined}
-      />
-
       <SettingsModal
         open={showSettings}
         onClose={() => setShowSettings(false)}
-        email={me?.email ?? null}
-        balance={balance}
-        onTopUp={() => { setShowSettings(false); openTopUp(); }}
-        glossaryCount={glossaries?.length ?? 0}
-        referral={referral}
         jobCount={jobs.length}
-        onManageGlossary={() => { setShowSettings(false); go("glossary"); }}
         onPurged={() => { setJobs([]); setDetailSrc(null); setPage("new"); refreshAccount(); }}
-        onDeleted={() => { setShowSettings(false); onLogout(); }}
       />
-
-      {/* 打开时才挂载：prefill 是 useState 初值，重挂才能捡到每次软墙带来的新缺口 */}
-      {showTopUp && (
-        <TopUpModal
-          open
-          balance={balance}
-          prefill={topUpPrefill}
-          onClose={() => { setShowTopUp(false); setTopUpPrefill(undefined); }}
-          onDone={(amt) => { void doTopup(amt); }}
-        />
-      )}
     </div>
   );
 }

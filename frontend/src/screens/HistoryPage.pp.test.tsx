@@ -43,9 +43,9 @@ describe("HistoryPage 后处理 caption 三态", () => {
     expect(screen.getByRole("button", { name: /处理中 0|Processing 0/ })).toBeInTheDocument();
   });
 
-  it("失败：bgSoft 徽章「后处理失败 · 未计费」+「进详情页重试」，状态列不变", () => {
+  it("失败：bgSoft 徽章「后处理失败」+「进详情页重试」，状态列不变（本机版不说「未计费」）", () => {
     wrap(<HistoryPage items={[ppFailed]} onNew={vi.fn()} onOpen={vi.fn()} />);
-    expect(screen.getByText(/✦ 后处理失败 · 未计费|✦ Post-processing failed · not billed/)).toBeInTheDocument();
+    expect(screen.getByText(/✦ 后处理失败$|✦ Post-processing failed$/)).toBeInTheDocument();
     expect(screen.getByText(/进详情页重试|retry from the transcript page/)).toBeInTheDocument();
     expect(screen.getAllByText(/^已完成$|^Done$/).length).toBeGreaterThan(0);
     // 列表不放重试按钮（下载/重试统一收到详情页）

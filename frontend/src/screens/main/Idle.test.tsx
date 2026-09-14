@@ -2,23 +2,22 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UILangProvider } from "../../lib/i18n";
-import { costFor, usd, RATE_PER_HOUR, RATE_PER_MIN } from "../../lib/pricing";
 import { Idle } from "./Idle";
 
-function renderIdle(onStart = vi.fn(), balance = 100, onTopUp = vi.fn(), lang = "zh") {
+// 本机版（与线上不同）：线上的「估费」「卡内软墙」两组随收费一起去掉，改测「不出现任何金额」。
+function renderIdle(onStart = vi.fn(), lang = "zh") {
   render(
     <UILangProvider>
-      <Idle onStart={onStart} lang={lang} setLang={() => {}} balance={balance} onTopUp={onTopUp} />
+      <Idle onStart={onStart} lang={lang} setLang={() => {}} />
     </UILangProvider>,
   );
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-  return { onStart, onTopUp, input };
+  return { onStart, input };
 }
 
 const audio = (name: string) => new File(["x"], name, { type: "audio/mp4" });
 
 // jsdom 不解码音频：拦截 createElement("audio")，让 ingest 同步拿到指定时长。
-// 预估费用随语种档位变，测试一律用 costFor() 推期望值，不写死金额。
 function mockAudioDuration(sec: number) {
   const orig = document.createElement.bind(document);
   vi.spyOn(document, "createElement").mockImplementation(((tag: string) => {
@@ -80,114 +79,15 @@ describe("Idle — explicit start", () => {
   });
 });
 
-describe("Idle — 估费", () => {
-  it("预估费用 = 时长 × 单价，且 27 门语言同价（2026-08-31 定价 V3 塌成单档）", async () => {
+describe("Idle — 本机不收费", () => {
+  it("选好文件后只报时长，页面上没有费用、余额、充值与免费额度", async () => {
     mockAudioDuration(3600);
-    renderIdle(vi.fn(), 1000, vi.fn(), "ru");
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-    await userEvent.upload(input, audio("ru.m4a"));
-    // findAll 而不是 find：单档之后 1 小时的估费与左栏 HeroPitch 的每小时单价
-    // 恰好是同一个数（$3.00），页面上本来就会出现两处。
-    expect((await screen.findAllByText(usd(costFor(3600, "ru")))).length).toBeGreaterThan(0);
-    // 换成任何一门语言，同样一小时都是同一个数——「按语种分档」真的没了
-    expect(costFor(3600, "en")).toBe(costFor(3600, "ru"));
-    expect(costFor(3600, "zh")).toBe(costFor(3600, "ru"));
-  });
-
-  // 单价那一行的**单位**（2026-08-31 定价 V3 验收补）：站上其余每一处都按小时报价，
-  // 这一行曾是全站唯一按分钟的，于是同一屏左栏写每小时价、右栏写每分钟价。
-  // ⚠️ 判据是「每分钟的那个数不许出现在页面上」，不是「有没有『小时』两个字」——
-  // 后者在单位没改、只是旁边多了句带「小时」的文案时照样绿。
-  it("单价那一行按小时报价：页面上不出现每分钟的数", async () => {
-    mockAudioDuration(1800);
-    renderIdle(vi.fn(), 1000, vi.fn(), "zh");
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const { input } = renderIdle();
     await userEvent.upload(input, audio("zh.m4a"));
-    expect((await screen.findAllByText(new RegExp(`${usd(RATE_PER_HOUR).replace("$", "\\$")}\\s*/`))).length)
-      .toBeGreaterThan(0);
-    expect(screen.queryByText(new RegExp(`${usd(RATE_PER_MIN).replace("$", "\\$")}\\s*/`))).toBeNull();
-  });
-
-  it("免费额度抵扣：预估先抵免费秒、剩余按单价；软墙不把免费覆盖的部分算成缺口", async () => {
-    mockAudioDuration(3600);   // 1 小时
-    render(
-      <UILangProvider>
-        <Idle onStart={vi.fn()} lang="zh" setLang={() => {}} balance={30} onTopUp={vi.fn()}
-          freeLeftSeconds={1800} />
-      </UILangProvider>,
-    );
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-    await userEvent.upload(input, audio("zh.m4a"));
-    // 3600s − 1800s 免费 = 1800s 付费 → 期望值从 costFor 推，不写死金额
-    expect((await screen.findAllByText(usd(costFor(1800, "zh")))).length).toBeGreaterThan(0);
-    expect(screen.getByText(/已抵免费|free −/)).toBeInTheDocument();
-    expect(screen.getByText(/开始转录|^Start/)).toBeInTheDocument();     // 软墙没挡
-    expect(screen.getByText(/免费额度剩余|Free quota left/)).toBeInTheDocument();
-  });
-
-  it("长文件照样吃免费额度：先抵额度，超出的部分才按单价估", async () => {
-    // 2026-08-15 去掉了「免费额度只能用于 ≤90 分钟」那道闸——它与分钟预算重复，
-    // 唯一作用是让企业号的额度覆盖不了满 4 小时。这条测试守着别改回去。
-    mockAudioDuration(91 * 60);
-    render(
-      <UILangProvider>
-        <Idle onStart={vi.fn()} lang="zh" setLang={() => {}} balance={1000} onTopUp={vi.fn()}
-          freeLeftSeconds={3600} />
-      </UILangProvider>,
-    );
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-    await userEvent.upload(input, audio("long.m4a"));
-    // 91 分钟 − 60 分钟免费额度 = 31 分钟按现价计（期望值从 costFor 推，不写死金额）
-    expect(await screen.findByText(usd(costFor(31 * 60, "zh")))).toBeTruthy();
-  });
-
-  it("IP 闸触发（freeLimited）显示「同网络已有试用」提示", () => {
-    render(
-      <UILangProvider>
-        <Idle onStart={vi.fn()} lang="zh" setLang={() => {}} balance={0} onTopUp={vi.fn()}
-          freeLeftSeconds={0} freeLimited />
-      </UILangProvider>,
-    );
-    expect(screen.getByText(/同网络已有试用|already has a trial/)).toBeInTheDocument();
-  });
-
-  // 2026-08-18「项目」下架（见 CLAUDE.md）：项目是永久锁价承诺而我们没有结项/删除手段，
-  // 入口先摘掉。上传页的估费从此只认全局现价。
-  it("上传页没有项目选择器；估费走全局现价", async () => {
-    mockAudioDuration(3600);
-    render(
-      <UILangProvider>
-        <Idle onStart={vi.fn()} lang="zh" setLang={() => {}} balance={1000} onTopUp={vi.fn()} />
-      </UILangProvider>,
-    );
-    expect(screen.queryByText(/不归入项目|No project/)).toBeNull();
-    expect(screen.queryByText(/新建项目|New project/)).toBeNull();
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-    await userEvent.upload(input, audio("zh.m4a"));
-    expect((await screen.findAllByText(usd(costFor(3600, "zh")))).length).toBeGreaterThan(0);
-  });
-});
-
-describe("Idle — in-card soft wall", () => {
-  it("blocks start when est. cost exceeds balance and pre-fills the shortfall", async () => {
-    mockAudioDuration(3600);
-    const balance = 1;
-    const shortfall = Math.ceil(costFor(3600, "ru") - balance);   // 小语种档 1 小时，$1 余额远不够
-    const { onStart, onTopUp, input } = renderIdle(vi.fn(), balance, vi.fn(), "ru");
-    await userEvent.upload(input, audio("long.m4a"));
-    expect(await screen.findByText(/先充值|Top up first/)).toBeTruthy();
-    expect(screen.queryByText(/开始转录/)).toBeNull();
-    await userEvent.click(screen.getByText(/先充值|Top up first/));
-    expect(onTopUp).toHaveBeenCalledWith(shortfall);
-    expect(onStart).not.toHaveBeenCalled();
-  });
-
-  it("starts normally when balance covers the cost", async () => {
-    mockAudioDuration(600);
-    const { onStart, input } = renderIdle(vi.fn(), 100);
-    await userEvent.upload(input, audio("ok.m4a"));
-    await userEvent.click(await screen.findByText(/开始转录/));
-    expect(onStart).toHaveBeenCalled();
+    expect((await screen.findAllByText("1:00:00")).length).toBeGreaterThan(0);
+    const body = document.body.textContent || "";
+    expect(body).not.toMatch(/\$\d|预估费用|余额|充值|免费额度|计费/);
+    expect(screen.getByText(/开始转录/)).toBeInTheDocument();
   });
 });
 
@@ -203,7 +103,7 @@ describe("Idle — 左栏与首帧布局", () => {
   function renderWith(recent?: Parameters<typeof Idle>[0]["recent"]) {
     return render(
       <UILangProvider>
-        <Idle onStart={vi.fn()} lang="zh" setLang={() => {}} balance={100} onTopUp={vi.fn()} recent={recent} />
+        <Idle onStart={vi.fn()} lang="zh" setLang={() => {}} recent={recent} />
       </UILangProvider>,
     );
   }

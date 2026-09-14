@@ -1456,7 +1456,7 @@ export function Result({ onBack, lang, job, jobId, segments, metrics, review, re
         {audioGone ? (
           <div style={{ display: "flex", alignItems: "center", gap: space.s3, padding: "13px 16px", borderRadius: radius.md, background: semantic.surface.sunken, border: `1px solid ${semantic.border.subtle}`, color: semantic.text.muted, fontSize: 13, fontFamily: fonts.sans }}>
             <span aria-hidden style={{ fontSize: 15, flex: "0 0 auto" }}>🔇</span>
-            <span>{L("录音已删除 · 为保护隐私，录音在上传 7 天后自动清除。文字稿仍可查看与导出。", "Audio deleted · for privacy, recordings are removed 7 days after upload. Your transcript stays available to view and export.")}</span>
+            <span>{L("录音已删除 · 文字稿仍可查看与导出。", "Audio deleted · your transcript stays available to view and export.")}</span>
           </div>
         ) : (
           <>
@@ -1479,7 +1479,8 @@ export function Result({ onBack, lang, job, jobId, segments, metrics, review, re
             <div style={{ display: "flex", gap: space.s4, justifyContent: "space-between", alignItems: "baseline", marginTop: 6, fontSize: 11, flexWrap: "wrap" }}>
               {/* 7 天删除预告是必读信息，不能用 ghost（2.01:1）——红线 11 */}
               <span style={{ color: semantic.text.muted, fontFamily: fonts.sans }}>
-                {L("录音将在上传 7 天后自动删除（隐私保护）· 请及时复核与导出", "Audio is auto-deleted 7 days after upload (privacy) · review & export in time")}
+                {/* 本机版：录音与稿子存在这台电脑上、不自动删（线上这里预告 7 天后删除） */}
+                {L("录音和文字稿都存在这台电脑上，不会自动删除", "Audio and transcripts stay on this computer and are never deleted automatically")}
               </span>
               {marks.length > 0 && (
                 <span style={{ display: "inline-flex", gap: space.s4, color: semantic.text.muted, flex: "0 0 auto" }}>

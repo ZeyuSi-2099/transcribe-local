@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PostprocessCard, ppStepClimb } from "./PostprocessCard";
-import { usd, ppCostFor, ppRatePerHourFor } from "../../lib/pricing";
 import { UILangProvider } from "../../lib/i18n";
 import type { PostprocessStatus } from "../../lib/api";
 import { downloadUrl } from "../../lib/download";
@@ -78,24 +77,11 @@ describe("PostprocessCard 五态", () => {
     expect(screen.queryByText(/先建归类方案|Build a scheme first/)).toBeNull();
   });
 
-  it("价格行：按勾选步骤×时长动态预估 + 失败不计费；无时长退化为按小时的加价率", async () => {
-    // 金额一律经 pricing.ts 现算——写死数字的话，调价当天这条测试照样绿
+  // 本机版（与线上不同）：线上这里测价格行（按步骤×时长预估、失败不计费、按小时的加价率），本机不收费。
+  it("本机不显示价格与「失败不计费」", async () => {
     wrap({ durationSec: 3600 });
     await screen.findByText(/只跑|Runs just/);
-    expect(screen.getByText(`≈ ${usd(ppCostFor(["narrate"], 3600))}`)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("checkbox", { name: /脱敏|Redact/ }));
-    expect(screen.getByText(`≈ ${usd(ppCostFor(["narrate", "redact"], 3600))}`)).toBeInTheDocument();
-    expect(screen.queryByText(/免费|Free/)).toBeNull();
-    expect(screen.getByText(/失败不计费|No charge on failure/)).toBeInTheDocument();
-  });
-
-  // 2026-08-31 定价 V3：对外一律按小时报价，这条兜底也跟着换单位——
-  // 站上其余每一处都写「/小时」，只有这里写「/分钟」的话，读者要自己换算才知道贵不贵。
-  // ⚠️ 断言拿 pricing.ts 现算，不写死数字：写死的话调价当天这条照样绿。
-  it("价格行：时长未知时显示合计加价率 /小时（金额一律经 pricing.ts 现算）", async () => {
-    wrap();
-    await screen.findByText(/只跑|Runs just/);
-    expect(screen.getByText(`${usd(ppRatePerHourFor(["narrate"]))}/小时`)).toBeInTheDocument();   // 默认只勾视角转换
+    expect(document.body.textContent || "").not.toMatch(/\$\d|≈|不计费|No charge/);
   });
 
   it("脱敏下拉：首项固定「不使用清单 · 智能识别」+ 条数 + 选中 ✓ + 点外关闭", async () => {

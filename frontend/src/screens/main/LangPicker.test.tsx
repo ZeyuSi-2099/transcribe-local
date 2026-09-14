@@ -3,40 +3,49 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UILangProvider } from "../../lib/i18n";
 import { LangPicker } from "./LangPicker";
+import { LOCAL_LANGS } from "../../lib/localLangs";
 
 const wrap = (ui: React.ReactNode) => render(<UILangProvider>{ui}</UILangProvider>);
 
 // 界面语言默认中文 → 语言名显示规范中文译名（见 lib/langs.ts name[0]）
+// 本机版（与线上不同）：照线上列出全部语言，本地还转不了的标灰、点不了（Duner 2026-09-14 定）。
 describe("LangPicker", () => {
-  it("selects a common language", async () => {
+  it("本地支持的语言可点选", async () => {
+    const fn = vi.fn();
+    wrap(<LangPicker value="en" onChange={fn} />);
+    await userEvent.click(screen.getByText("中文"));
+    expect(fn).toHaveBeenCalledWith("zh");
+  });
+
+  it("台面上本地不支持的格子是禁用的，点了不回调，并说清原因", async () => {
     const fn = vi.fn();
     wrap(<LangPicker value="zh" onChange={fn} />);
-    await userEvent.click(screen.getByText("英语"));
-    expect(fn).toHaveBeenCalledWith("en");
+    for (const [name, code] of [
+      ["英语", "en"], ["西班牙语", "es"], ["阿拉伯语", "ar"], ["法语", "fr"], ["葡萄牙语", "pt"],
+      ["印尼语", "id"], ["俄语", "ru"], ["德语", "de"], ["日语", "ja"], ["意大利语", "it"],
+    ] as const) {
+      if (LOCAL_LANGS.has(code)) continue;
+      const btn = screen.getByRole("button", { name });
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveAttribute("title", "本地版暂不支持这门语言");
+      await userEvent.click(btn);
+    }
+    expect(fn).not.toHaveBeenCalled();
   });
-  it("更多下拉里的语言可点选", async () => {
-    // 27 门时代：下拉里的语言全部可选，不再是「即将支持」占位
+
+  it("「更多」照样展开，里面本地不支持的语言同样点不了", async () => {
     const fn = vi.fn();
     wrap(<LangPicker value="zh" onChange={fn} />);
     await userEvent.click(screen.getByText(/更多|More/));
-    await userEvent.click(await screen.findByText("日语"));
-    expect(fn).toHaveBeenCalledWith("ja");
+    const ko = (await screen.findAllByRole("button")).find((b) => b.textContent === "韩语");
+    expect(ko).toBeDisabled();
+    expect(fn).not.toHaveBeenCalled();
   });
+
   it("下拉不再出现「即将支持」占位", async () => {
     wrap(<LangPicker value="zh" onChange={() => {}} />);
     await userEvent.click(screen.getByText(/更多|More/));
     expect(screen.queryByText(/即将支持|Coming soon/)).toBeNull();
-  });
-  it("台面上的 11 门都是可点的格子（不再需要展开「更多」）", async () => {
-    const fn = vi.fn();
-    wrap(<LangPicker value="zh" onChange={fn} />);
-    for (const [name, code] of [
-      ["西班牙语", "es"], ["阿拉伯语", "ar"], ["法语", "fr"], ["葡萄牙语", "pt"],
-      ["印尼语", "id"], ["俄语", "ru"], ["德语", "de"], ["日语", "ja"], ["意大利语", "it"],
-    ] as const) {
-      await userEvent.click(screen.getByText(name));
-      expect(fn).toHaveBeenCalledWith(code);
-    }
   });
 
   // 说明与标签同一行（格子多一行要 47px，卡片只剩 28px 余量——这句挪上来省的 22px 是唯一来源）。

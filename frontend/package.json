@@ -1,18 +1,16 @@
 {
-  "name": "transcribe-mvp",
+  "name": "transcribe-local-ui",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && vite-node scripts/prerender-meta.ts",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "sitemap": "node scripts/gen-sitemap.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@sentry/react": "^10.57.0",
     "budoux": "^0.9.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

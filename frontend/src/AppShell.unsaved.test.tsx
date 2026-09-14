@@ -20,7 +20,7 @@ beforeEach(() => {
   })));
 });
 
-const wrap = () => render(<UILangProvider><AppShell me={{ email: "a@b.com", balanceCents: 0 }} onLogout={vi.fn()} /></UILangProvider>);
+const wrap = () => render(<UILangProvider><AppShell me={{ email: "a@b.com", balanceCents: 0 }} /></UILangProvider>);
 const nav = (name: RegExp) => userEvent.click(screen.getAllByText(name)[0]);
 // 历史页在空态下不渲染 h1（只有空态屏），用文档标题判「到了哪一页」
 const onHistory = () => waitFor(() => expect(document.title).toMatch(/我的转录|My transcripts/));

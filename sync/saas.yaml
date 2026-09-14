@@ -83,6 +83,9 @@ rules:
     why: 测的是上面不拿的账户、计费、增长与云端模块
 
   # ───────────── 不拿：营销站、法律页、登录、充值界面 ─────────────
+  - glob: ["src/lib/pricing.ts", "src/screens/legal/bannedAiPhrases.ts"]
+    as: same
+    why: 价格常量被历史页、后处理卡片、运行面板引用（本地界面不显示金额，但常量原样留着便于同步）；去 AI 化禁语清单被两个应用内测试引用
   - glob: ["src/screens/marketing/*", "src/screens/legal/*"]
     as: skip
     why: 营销站与条款隐私页，开源仓的 README 承担介绍
@@ -108,11 +111,11 @@ rules:
     as: same
     why: 用例输入含真实访谈原句与由它生成的复核报告行 —— 原样公开
   - glob: ["src/screens/main/Result.test.tsx"]
-    as: same
-    why: 断言引用 reviewData 的示例词 —— 原样公开
+    as: modify
+    why: 断言引用 reviewData 的示例词（原样公开）；「7 天后自动删除」预告那两条改成本机的「不自动删除」
   - glob: ["src/AppShell.test.tsx"]
-    as: defer
-    why: 断言引用 reviewData 的示例词（原样公开）；AppShell 本身要去掉登录路由，第 4 步看这个测试跟不跟着改
+    as: modify
+    why: 断言引用 reviewData 的示例词（原样公开）；「侧栏显示邮箱与头像」「从头像菜单进账单」两条随账户去掉
   - glob: ["src/lib/glossary.test.ts", "src/screens/main/GlossaryAssist.test.tsx", "src/screens/main/OutlineIntake.test.tsx",
            "server/tests/test_glossary_assist.py"]
     as: same
@@ -123,9 +126,6 @@ rules:
   - glob: ["server/pipeline/conflicts.py"]
     as: same
     why: 模块头注释写了录音编号与金标来源 —— 原样公开
-  - glob: ["src/lib/sampleData.ts"]
-    as: modify
-    why: 类型原样；账单与充值的示例行随计费一起去掉
 
   # ───────────── 有意不同：换底座 ─────────────
   - glob: ["server/app/db.py", "server/app/schema.sql"]
@@ -159,9 +159,24 @@ rules:
   - glob: ["src/App.tsx", "src/AppShell.tsx", "src/main.tsx", "src/components/Sidebar.tsx",
            "src/screens/SettingsModal.tsx", "src/screens/AdminPage.tsx",
            "src/screens/main/Idle.tsx", "src/screens/main/LangPicker.tsx",
-           "src/lib/api.ts", "src/lib/auth.ts"]
+           "src/screens/main/MainPage.tsx", "src/screens/HistoryPage.tsx", "src/screens/main/PostprocessCard.tsx",
+           "src/screens/main/Result.tsx"]
     as: modify
-    why: 去掉公开页与登录路由、余额与充值；语言不支持的标灰；设置只留「数据」；驾驶舱去掉增长与用户；不上报 Sentry
+    why: 去掉公开页与登录路由、余额、充值与所有金额显示；语言不支持的标灰、默认中文；设置只留「数据」；驾驶舱改名运行面板、去掉增长用户退款与增长周报；不上报 Sentry
+  - glob: ["src/lib/appI18n/index.ts", "src/lib/appI18n/extractKeys.ts"]
+    as: modify
+    why: 语种名表改从本地 langNames.ts 取（不搬营销站），合并本地新增文案 local.ts；扫描清单加 App.tsx
+  - glob: ["src/App.test.tsx", "src/AppShell.unsaved.test.tsx", "src/components/Sidebar.test.tsx",
+           "src/screens/SettingsModal.test.tsx", "src/screens/main/Idle.test.tsx", "src/screens/main/MainPage.test.tsx",
+           "src/screens/main/LangPicker.test.tsx", "src/screens/main/PostprocessCard.test.tsx",
+           "src/screens/HistoryPage.test.tsx", "src/screens/HistoryPage.pp.test.tsx", "src/screens/AdminPage.test.tsx",
+           "src/lib/appI18n/appI18n.guard.test.ts", "src/lib/layout.guard.test.ts", "src/lib/responsive.guard.test.ts",
+           "src/lib/ux.guard.test.ts", "src/lib/outlineFile.test.ts"]
+    as: modify
+    why: 随上面的页面一起改——登录、宣传页、余额、充值、推荐、注销、增长、用户、定价页相关用例去掉，改测本机版的对应行为；其余用例原样
+  - glob: ["src/routes.test.tsx", "src/lib/turnaround.guard.test.tsx"]
+    as: skip
+    why: 只测公开页路由表与营销站、定价页的出稿时长文案，本地不搬那些页面
   - glob: ["index.html", "package.json", "package-lock.json", "vite.config.ts"]
     as: modify
     why: 去掉营销站的元信息与预渲染、Sentry 依赖；构建产物随本地包发布

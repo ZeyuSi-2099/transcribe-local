@@ -20,12 +20,12 @@ function pyConst(src: string, name: string): number {
 
 describe("大纲上限：前端与后端同值", () => {
   it("字数上限 = glossary_assist.MAX_OUTLINE_CHARS", () => {
-    const back = pyConst(read("server/app/glossary_assist.py"), "MAX_OUTLINE_CHARS");
+    const back = pyConst(read("../backend/app/glossary_assist.py"), "MAX_OUTLINE_CHARS");
     expect(MAX_OUTLINE_CHARS).toBe(back);
   });
 
   it("文件体积上限 = outline_file.MAX_BYTES", () => {
-    const back = pyConst(read("server/app/outline_file.py"), "MAX_BYTES");
+    const back = pyConst(read("../backend/app/outline_file.py"), "MAX_BYTES");
     expect(MAX_OUTLINE_BYTES).toBe(back);
   });
 });

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { semantic, fonts, labelStyle, radius, motion, shadow } from "../../styles/tokens";
 import { useL } from "../../lib/i18n";
 import { COMMON_LANGS, MORE_LANGS, langName } from "../../lib/langs";
+import { LOCAL_LANGS } from "../../lib/localLangs";
 
 interface LangPickerProps {
   value: string;
@@ -11,6 +12,8 @@ interface LangPickerProps {
 export function LangPicker({ value, onChange }: LangPickerProps) {
   const L = useL();
   const [open, setOpen] = useState(false);
+  // 本机版：照线上列出全部语言，本地还转不了的标灰、点不了（Duner 2026-09-14 定）
+  const notLocal = L("本地版暂不支持这门语言", "Not available in the local version yet");
 
   const isMore = MORE_LANGS.some((l) => l.id === value);
 
@@ -27,7 +30,7 @@ export function LangPicker({ value, onChange }: LangPickerProps) {
   // ⚠️ 露出 11 门后**最长的一格换人了**：新进来的印尼语在 fr/it/pt/ja 四门都是最宽的那个。
   // 再加语种前先按这四门量一遍，尤其日文——只剩 10px。量的时候一次只渲染一门语言
   // （UILangProvider 会写 <html lang>，八门同屏时 :lang() 的字体栈有七门是错的）。
-  const chipStyle = (selected: boolean): React.CSSProperties => ({
+  const chipStyle = (selected: boolean, disabled = false): React.CSSProperties => ({
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -35,7 +38,8 @@ export function LangPicker({ value, onChange }: LangPickerProps) {
     width: "100%",
     boxSizing: "border-box",
     padding: "8px 14px",
-    cursor: "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.45 : 1,
     fontSize: 13,
     fontFamily: fonts.sans,
     // ⚠️ 选中态 2026-08-31 由「纯墨底反白」改成与充值档位同一套（1.5px 赤陶描边 + 极浅赤陶底）。
@@ -81,7 +85,9 @@ export function LangPicker({ value, onChange }: LangPickerProps) {
             type="button"
             aria-pressed={value === seg.id}
             onClick={() => onChange(seg.id)}
-            style={chipStyle(value === seg.id)}
+            disabled={!LOCAL_LANGS.has(seg.id)}
+            title={LOCAL_LANGS.has(seg.id) ? undefined : notLocal}
+            style={chipStyle(value === seg.id, !LOCAL_LANGS.has(seg.id))}
           >
             {langName(seg.id, L)}
           </button>
@@ -127,13 +133,16 @@ export function LangPicker({ value, onChange }: LangPickerProps) {
                     key={l.id}
                     type="button"
                     aria-pressed={value === l.id}
+                    disabled={!LOCAL_LANGS.has(l.id)}
+                    title={LOCAL_LANGS.has(l.id) ? undefined : notLocal}
                     onClick={() => { onChange(l.id); setOpen(false); }}
                     style={{
                       padding: "9px 14px",
                       display: "flex",
                       alignItems: "center",
                       gap: 12,
-                      cursor: "pointer",
+                      cursor: LOCAL_LANGS.has(l.id) ? "pointer" : "not-allowed",
+                      opacity: LOCAL_LANGS.has(l.id) ? 1 : 0.45,
                       width: "100%",
                       textAlign: "left",
                       border: "none",

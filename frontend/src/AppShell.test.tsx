@@ -20,24 +20,9 @@ beforeEach(() => {
 
 describe("AppShell", () => {
   it("new user lands straight on the upload page (welcome screen removed)", () => {
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 0 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 0 }} />);
     expect(screen.getAllByText(/新建转录|New transcription/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/上传，/)).toBeNull(); // 旧欢迎屏标题不再出现
-  });
-
-  it("shows real account email and initial in the sidebar", () => {
-    wrap(<AppShell me={{ email: "duner@x.com", balanceCents: 3000 }} onLogout={vi.fn()} />);
-    expect(screen.getByText("duner@x.com")).toBeInTheDocument();
-    expect(screen.getByText("duner")).toBeInTheDocument();      // 显示名 = 邮箱前缀
-    expect(screen.getByText("D")).toBeInTheDocument();          // 头像首字母
-  });
-
-  it("navigates to billing from the avatar menu", async () => {
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
-    await userEvent.click(screen.getByText("A")); // 打开头像菜单（首字母头像）
-    await userEvent.click(screen.getByText(/充值与账单|Billing/));
-    // 新账户账本为空 → 账单浮窗显示空态（标题 + 去充值入口）
-    expect(screen.getByText(/还没有消费记录|Nothing spent yet/)).toBeInTheDocument();
   });
 
   // 回归：切换历史任务时，详情页「全文」必须随新任务刷新，不能残留上一个任务的稿。
@@ -65,7 +50,7 @@ describe("AppShell", () => {
       return { ok: true, json: async () => body };
     }));
 
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} />);
 
     // 进侧栏「我的转录」→ 开甲任务 → 看到甲的全文
     await userEvent.click(screen.getAllByText("我的转录")[0]);
@@ -107,7 +92,7 @@ describe("AppShell", () => {
       return { ok: true, json: async () => body };
     }));
 
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} />);
     await userEvent.click(screen.getAllByText("我的转录")[0]);
     await userEvent.click(await screen.findByText("甲.flac"));
     expect(await screen.findByText(/ALPHA标记/)).toBeInTheDocument();
@@ -141,7 +126,7 @@ describe("AppShell", () => {
       return { ok: true, json: async () => body };
     }));
 
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} />);
     await userEvent.click(screen.getAllByText("我的转录")[0]);
     await userEvent.click(await screen.findByText("甲.flac"));
     expect(await screen.findByText(/ALPHA标记/)).toBeInTheDocument();
@@ -182,7 +167,7 @@ describe("AppShell", () => {
       return { ok: true, json: async () => body };
     }));
 
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} />);
     await userEvent.click(screen.getAllByText("我的转录")[0]);
     await userEvent.click(await screen.findByText("甲.flac"));
 
@@ -211,7 +196,7 @@ describe("AppShell", () => {
       return { ok: true, json: async () => body };
     }));
 
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 1000 }} />);
     await userEvent.click(screen.getAllByText("我的转录")[0]);
     await userEvent.click(await screen.findByText("甲.flac"));
 
@@ -236,7 +221,7 @@ describe("AppShell — 进度与 ETA 必须同源", () => {
           }] }
         : { ledger: [] },
     })));
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 100000 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 100000 }} />);
     await userEvent.click(screen.getAllByText(/我的转录|My transcriptions/)[0]);
     // 首次观察 → 进度条 0%；ETA 必须跟这个 0% 一致（整段录音的预计时长），
     // 不是拿后端锚点 55% 折算出来的那个更小的数。
@@ -277,7 +262,7 @@ describe("AppShell — 进度与 ETA 必须同源", () => {
 
     it("手机：不渲染应用，让人用电脑", () => {
       phone();
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       expect(screen.getByText(/请用电脑打开|desktop browser/)).toBeInTheDocument();
       expect(screen.queryByText(/请把设备横过来|rotate your device/)).toBeNull();
       expect(screen.queryByText(/新建转录|New transcription/)).toBeNull();
@@ -285,26 +270,26 @@ describe("AppShell — 进度与 ETA 必须同源", () => {
 
     it("手机横过来仍然拦——横屏 844px 还是不够宽，别让人白转一次", () => {
       setTouch(true); setScreen(390, 844); setWidth(844);
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       expect(screen.getByText(/请用电脑打开|desktop browser/)).toBeInTheDocument();
     });
 
     it("平板竖屏：让人横过来，不是让人换电脑", () => {
       tabletPortrait();
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       expect(screen.getByText(/请把设备横过来|rotate your device/)).toBeInTheDocument();
       expect(screen.queryByText(/请用电脑打开|desktop browser/)).toBeNull();
     });
 
     it("平板横屏：放行（1180px 装得下）", () => {
       setTouch(true); setScreen(820, 1180); setWidth(1180);
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       expect(screen.getAllByText(/新建转录|New transcription/).length).toBeGreaterThan(0);
     });
 
     it("桌面窗口拖到 700px：照常进应用，一个字都不提示", () => {
       setTouch(false); setScreen(1512, 982); setWidth(700);
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       expect(screen.queryByText(/请用电脑打开|desktop browser/)).toBeNull();
       expect(screen.queryByText(/请把设备横过来|rotate your device/)).toBeNull();
       expect(screen.getAllByText(/新建转录|New transcription/).length).toBeGreaterThan(0);
@@ -312,7 +297,7 @@ describe("AppShell — 进度与 ETA 必须同源", () => {
 
     it("点「仍要继续」后放行——坚持要在手机上看的人不该被锁死", async () => {
       phone();
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       await userEvent.click(screen.getByText(/仍要继续|Continue anyway/));
       expect(screen.getAllByText(/新建转录|New transcription/).length).toBeGreaterThan(0);
       expect(screen.queryByText(/请用电脑打开|desktop browser/)).toBeNull();
@@ -320,7 +305,7 @@ describe("AppShell — 进度与 ETA 必须同源", () => {
 
     it("宽屏桌面不受影响", () => {
       setTouch(false); setScreen(1512, 982); setWidth(1440);
-      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+      wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
       expect(screen.queryByText(/请用电脑打开|desktop browser/)).toBeNull();
       expect(screen.getAllByText(/新建转录|New transcription/).length).toBeGreaterThan(0);
     });
@@ -349,7 +334,7 @@ describe("上传页的术语库默认值", () => {
 
   it("有术语库也不替用户挑一本，默认「不使用」", async () => {
     withBooks();
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
     expect(await screen.findByText(/^不使用$|^Don't use$/)).toBeInTheDocument();
     // 反面：任何一本库的名字都不该出现在那个位置（出现＝我们替他选了）
     expect(screen.queryByText("光伏采购访谈")).toBeNull();
@@ -358,7 +343,7 @@ describe("上传页的术语库默认值", () => {
   it("上次显式选过的那本仍然记住（记住选择 ≠ 替他选）", async () => {
     localStorage.setItem("glossaryId", "g2");
     withBooks();
-    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} onLogout={vi.fn()} />);
+    wrap(<AppShell me={{ email: "a@b.com", balanceCents: 2850 }} />);
     expect(await screen.findByText("医疗器械分销")).toBeInTheDocument();
     localStorage.removeItem("glossaryId");
   });

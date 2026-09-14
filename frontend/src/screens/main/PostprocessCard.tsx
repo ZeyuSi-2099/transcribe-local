@@ -10,7 +10,7 @@ import { useErrText } from "../../lib/userErrors";
 import { useEffect, useRef, useState } from "react";
 import { semantic, fonts, radius, shadow, motion, space } from "../../styles/tokens";
 import { useL, useUILang } from "../../lib/i18n";
-import { usd, ppCostFor, ppRatePerHourFor } from "../../lib/pricing";
+import { ppCostFor } from "../../lib/pricing";
 import { countRedactLines } from "../../lib/redactList";
 import { RedactScopeHelp } from "./RedactScope";
 import { RedactChanges, type RedactOverrideState } from "./RedactChanges";
@@ -420,10 +420,7 @@ export function PostprocessCard({ jobId, initialStatus, locked, remaining, durat
   // ══ 可发起态 ══
   const selSteps = STEP_ORDER.filter((s) => checked[s]);
   const n = selSteps.length;
-  // 预估价：加价率 × 时长（按秒折算；未计免费额度抵扣，实扣以结算为准）；时长未知退化为按小时的加价率（对外一律按小时报价）
-  const listPrice = durationSec != null && durationSec > 0
-    ? `≈ ${usd(ppCostFor(selSteps, durationSec))}`
-    : `${usd(ppRatePerHourFor(selSteps))}/${L("小时", "hour")}`;
+  // 本机版：不显示预估价与「失败不计费」（本机不收费）
   const selList = sortedLists.find((l) => l.id === redactListId) ?? null;
 
   const toggleStep = (s: PpStep) => setChecked((c) => ({ ...c, [s]: !c[s] }));
@@ -539,12 +536,6 @@ export function PostprocessCard({ jobId, initialStatus, locked, remaining, durat
       {startErr && <div style={{ fontSize: 12, color: semantic.accent.text, marginTop: space.s2 }}>{startErr}</div>}
       {/* flexWrap：360px 侧栏 + 英文文案时价格行与 CTA 挤不下一行，CTA 整体折行右对齐，不许溢出卡缘 */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: space.s2, rowGap: space.s2, marginTop: space.s3, paddingTop: space.s3, borderTop: `1px solid ${semantic.border.subtle}` }}>
-        <span style={{ fontFamily: fonts.mono, fontSize: 12, color: semantic.success.text, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-          {listPrice}
-        </span>
-        <span style={{ fontSize: 11, color: semantic.text.muted, whiteSpace: "nowrap" }}>
-          {L("失败不计费", "No charge on failure")}
-        </span>
         <span style={{ flex: 1 }} />
         <button
           className="tx-focus"

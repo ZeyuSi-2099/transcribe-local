@@ -248,8 +248,11 @@ def refresh_bocha() -> dict | None:
 # 全部自动拉取（看门狗周期调）：各家独立 try，缺钥匙者自动跳过；返回成功拉到的列表。
 # 元组在函数内构建（每次按模块全局解析）→ 测试可 monkeypatch 各 refresh_* 函数。
 def refresh_all() -> list[dict]:
+    """本机版（与线上不同）：只拉 DeepSeek 与博查——本地识别不用火山、阿里的云端引擎。
+    线上四家都拉；本机若也拉，环境变量里恰好有那两家钥匙时，看门狗会每隔一阵去查一次云端账单
+    （界面走查时实见：「余额自动刷新：1 家（豆包）」），与「识别全程本机」相悖。"""
     out = []
-    for fn in (refresh_deepseek, refresh_bocha, refresh_volc, refresh_aliyun):
+    for fn in (refresh_deepseek, refresh_bocha):
         try:
             r = fn()
             if r:

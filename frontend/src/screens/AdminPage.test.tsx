@@ -3,8 +3,9 @@ import { render, screen, fireEvent, within, waitFor } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { UILangProvider } from "../lib/i18n";
 import { getAdminOverview, getAdminBalances, getAdminExpiries, getAdminWorkflow, getAdminHealth,
-         getAdminAlerts, getAdminUsers, getAdminUserDetail } from "../lib/api";
+         getAdminAlerts } from "../lib/api";
 
+// 本机版（与线上不同）：充值退款、用户、增长三组与「发增长周报」随功能一起去掉。
 // setSpy 经 vi.hoisted 提升，工厂与用例都能访问；fixtures 放工厂内（避免 vi.mock 提升后引用未初始化变量）。
 const setSpy = vi.hoisted(() => vi.fn());
 const refundSpy = vi.hoisted(() => vi.fn());
@@ -94,7 +95,6 @@ function goTag(name: RegExp) {
   fireEvent.click(screen.getByRole("button", { name }));
 }
 const TAG_RESOURCE = /^(资源|Resources)$/;
-const TAG_USER = /^(用户|Users)$/;
 const TAG_WORKFLOW = /^(工作流|Workflow)$/;
 
 describe("AdminPage · 服务商余额", () => {
@@ -179,46 +179,6 @@ describe("AdminPage · 任务行主轨分片进度（新 primary 块 / 历史 g2
   });
 });
 
-
-describe("AdminPage · 充值退款", () => {
-  beforeEach(() => refundSpy.mockReset());
-
-  const lookup = async () => {
-    wrap(<AdminPage />);
-    goTag(TAG_USER);
-    await userEvent.type(await screen.findByLabelText(/用户邮箱|User email/), "u@x.com");
-    await userEvent.click(screen.getByRole("button", { name: /查询|Look up/ }));
-    await screen.findByText(/当前余额|Balance/);
-  };
-
-  it("列出充值记录：可退额、已退额、赠送与超窗口各自给出不可退的理由", async () => {
-    await lookup();
-    expect(screen.getByText("$4.00")).toBeInTheDocument();            // 可退额（后端算好的，前端不自己推）
-    expect(screen.getByText(/已退|refunded/)).toBeInTheDocument();
-    expect(screen.getByText(/赠送额度|Bonus credit/)).toBeInTheDocument();
-    expect(screen.getByText(/超出 14 天窗口|Past the 14-day window/)).toBeInTheDocument();
-    // 三行里只有真金白银那笔给退款按钮
-    expect(screen.getAllByRole("button", { name: /^(退款|Refund)$/ }).length).toBe(1);
-  });
-
-  it("发起退款：按分传给后端，回显「等回执到账」——发起阶段不动余额", async () => {
-    refundSpy.mockResolvedValue(undefined);
-    await lookup();
-    await userEvent.type(screen.getByLabelText(/退款金额|Refund amount/), "4");
-    await userEvent.click(screen.getByRole("button", { name: /^(退款|Refund)$/ }));
-    expect(refundSpy).toHaveBeenCalledWith("u@x.com", 7, 400);        // 元 → 分
-    expect(await screen.findByText(/待回执到账后扣减|updates on callback/)).toBeInTheDocument();
-  });
-
-  it("超过可退额：本地就拦下，不打后端（后端仍会再校验一次）", async () => {
-    await lookup();
-    await userEvent.type(screen.getByLabelText(/退款金额|Refund amount/), "9");
-    await userEvent.click(screen.getByRole("button", { name: /^(退款|Refund)$/ }));
-    expect(refundSpy).not.toHaveBeenCalled();
-    expect(await screen.findByText(/请输入 0 到 \$4\.00|between 0 and \$4\.00/)).toBeInTheDocument();
-  });
-
-});
 
 // ── 融合引擎健康度（P3·无头模式）─────────────────────────────────────────────
 // 订阅制没有余额可查，这张卡是成败统计。用例守三件事：状态判定不误报、
@@ -1153,19 +1113,6 @@ describe("AdminPage · 告警记录", () => {
     expect(calls[calls.length - 1][1]).toBe(true);
   });
 
-  it("「发一份增长周报」点一下就调接口，发完刷新列表（周报本身落在这张表里）", async () => {
-    growthReportSpy.mockReset().mockResolvedValue({ mailed: true, subject: "增长周报 2026-W36（手动）", week: "2026-W36" });
-    setAlerts([]);
-    wrap(<AdminPage />);
-    goResources();
-    await screen.findByRole("heading", { name: "告警" });
-    const before = (getAdminAlerts as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "发一份增长周报" }));
-    expect(await screen.findByRole("button", { name: "周报已发到邮箱" })).toBeInTheDocument();
-    expect(growthReportSpy).toHaveBeenCalledTimes(1);
-    expect((getAdminAlerts as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before);
-  });
-
   it("「已处理」只给要动手那一档——其余两档自己会消失，多点一次是白费动作", async () => {
     setAlerts([ALERT({ id: 1, tier: "act" }),
                ALERT({ id: 2, tier: "watch", subject: "余额偏低" }),
@@ -1216,276 +1163,5 @@ describe("AdminPage · 待办条只接「要动手」那一档", () => {
     setAlerts([ALERT({ subject: "退款扣减短缺，请人工对账", suppressed: 3 })]);
     wrap(<AdminPage />);
     expect(await screen.findByText(/退款扣减短缺，请人工对账（还触发了 3 次）/)).toBeInTheDocument();
-  });
-});
-
-// ── 用户 Tag（方案四）──────────────────────────────────────────────────────
-// 列表守的是「三种人分得开」，下钻守的是隐私边界与账目口径，调整守的是钱。
-const USER = (over: Record<string, unknown> = {}) => ({
-  email: "duner@acme.com", balanceCents: 4210, createdAt: "2026-07-02",
-  freeMinutesGranted: 300, freeMinutesLeft: 0, freeLimited: false,
-  topupCents: 6000, spentCents: 1790, jobs: 37, lastActive: "08-14 12:09", ...over,
-});
-const setUsers = (items: Record<string, unknown>[]) =>
-  (getAdminUsers as unknown as ReturnType<typeof vi.fn>)
-    .mockResolvedValue({ adjustMaxCents: 5000, items });
-const setDetail = (over: Record<string, unknown> = {}) =>
-  (getAdminUserDetail as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-    ...USER(), done: 35, failed: 2, postprocess: 3, glossaries: 1, pendingRefunds: 0,
-    ledger: [], jobs_: [], ...over,
-  });
-
-describe("AdminPage · 用户列表", () => {
-  const goUsers = () => fireEvent.click(screen.getByRole("button", { name: "用户" }));
-
-  beforeEach(() => {
-    (getAdminUsers as unknown as ReturnType<typeof vi.fn>).mockReset();
-    (getAdminUserDetail as unknown as ReturnType<typeof vi.fn>).mockReset();
-    setUsers([]);
-    setDetail();
-  });
-
-  // 列表存在的全部理由：光看余额「$0.00」分不出「花完了」和「从没充过」，
-  // 而这两种人一个该跟进、一个该观察，差着一次销售机会。
-  it("三种人各有各的说法，不是一样的 $0.00", async () => {
-    setUsers([
-      USER({ email: "paid@x.com" }),
-      USER({ email: "free@x.com", topupCents: 0, spentCents: 0, balanceCents: 0, jobs: 4 }),
-      USER({ email: "idle@x.com", topupCents: 0, spentCents: 0, balanceCents: 0, jobs: 0, lastActive: null }),
-    ]);
-    wrap(<AdminPage />);
-    goUsers();
-    expect(await screen.findByText(/充值 \$60\.00 · 消费 \$17\.90/)).toBeInTheDocument();
-    expect(screen.getByText(/未充值 · 只用过免费额度/)).toBeInTheDocument();
-    expect(screen.getByText(/注册后没有动静/)).toBeInTheDocument();
-  });
-
-  it("被降额的账号标出来——那是防滥用闸命中的痕迹", async () => {
-    setUsers([USER({ freeLimited: true })]);
-    wrap(<AdminPage />);
-    goUsers();
-    expect(await screen.findByText(/免费额度已降额/)).toBeInTheDocument();
-  });
-
-  // Q4：列表是扫的、下钻是查的。文件名摆在列表上等于每次打开用户页
-  // 都在浏览所有人的访谈主题。
-  it("列表里不出现文件名，下钻里才出现", async () => {
-    setUsers([USER()]);
-    setDetail({ jobs_: [{ id: "j1", fileName: "访谈-03.m4a", status: "done", lang: "zh",
-                          durationSec: 2100, attempts: 1, errorPublic: null, at: "08-14 12:09" }] });
-    wrap(<AdminPage />);
-    goUsers();
-    await screen.findByText("duner@acme.com");
-    expect(screen.queryByText(/访谈-03\.m4a/)).toBeNull();
-    fireEvent.click(screen.getByText("duner@acme.com"));
-    expect(await screen.findByText(/访谈-03\.m4a/)).toBeInTheDocument();
-  });
-});
-
-describe("AdminPage · 用户下钻与余额调整", () => {
-  const openUser = async () => {
-    fireEvent.click(screen.getByRole("button", { name: "用户" }));
-    fireEvent.click(await screen.findByText("duner@acme.com"));
-  };
-
-  beforeEach(() => {
-    (getAdminUsers as unknown as ReturnType<typeof vi.fn>).mockReset();
-    (getAdminUserDetail as unknown as ReturnType<typeof vi.fn>).mockReset();
-    adjustSpy.mockReset().mockResolvedValue({ balanceCents: 4710, beforeCents: 4210 });
-    setUsers([USER()]);
-    setDetail();
-  });
-
-  // 赠送额度不是钱：显示成 +$0.00 会让人以为白送了钱，而「这人一共给过我们多少」
-  // 是这张表唯一要回答的问题。
-  it("注册赠送在账目里明写「不是钱」，不占金额栏", async () => {
-    setDetail({ ledger: [{ id: 1, kind: "topup", amountCents: 0, fileName: null, lang: null,
-                           durationSec: null, source: "bonus", note: null, operator: null,
-                           refundedCents: 0, at: "07-02 11:20" }] });
-    wrap(<AdminPage />);
-    await openUser();
-    expect(await screen.findByText("赠送额度")).toBeInTheDocument();
-    expect(screen.getByText(/注册赠送，不计入付费/)).toBeInTheDocument();
-  });
-
-  // 「进账本」这件事只做一半的话，三个月后那笔钱照样解释不了
-  it("手工调整的理由和操作人跟这笔流水一起显示", async () => {
-    setDetail({ ledger: [{ id: 2, kind: "adjust", amountCents: 500, fileName: null, lang: null,
-                           durationSec: null, source: "admin", note: "转录质量问题补偿",
-                           operator: "ops@x.com", refundedCents: 0, at: "08-14 13:00" }] });
-    wrap(<AdminPage />);
-    await openUser();
-    expect(await screen.findByText("手工调整")).toBeInTheDocument();
-    const row = screen.getByText(/转录质量问题补偿/);
-    expect(row.textContent).toMatch(/ops@x\.com/);
-  });
-
-  // ── 测试号工具（2026-09-03）──
-  it("测试域名的号也标「测试号」，只标不过滤", async () => {
-    setUsers([USER({ email: "test-a@transcribe.solutions", isTest: true }), USER({ email: "real@acme.com" })]);
-    wrap(<AdminPage />);
-    fireEvent.click(screen.getByRole("button", { name: "用户" }));
-    await screen.findByText("test-a@transcribe.solutions");
-    expect(screen.getAllByText("测试号")).toHaveLength(1);
-    expect(screen.getByText("real@acme.com")).toBeInTheDocument();
-  });
-
-  it("测试号能模拟消耗：分钟数交给后端，回话原样显示", async () => {
-    setDetail({ isTest: true });
-    simulateSpy.mockResolvedValue({ freeSecondsUsed: 10800, paidSeconds: 1200, chargedCents: 100, balanceCents: 1400 });
-    wrap(<AdminPage />);
-    await openUser();
-    fireEvent.change(await screen.findByLabelText("模拟分钟数"), { target: { value: "200" } });
-    fireEvent.click(screen.getByRole("button", { name: "模拟消耗" }));
-    await vi.waitFor(() => expect(simulateSpy).toHaveBeenCalledWith("duner@acme.com", 200));
-    expect(await screen.findByText(/已记 200 分钟：免费 180 分钟 \+ 付费 \$1\.00，余额 \$14\.00/)).toBeInTheDocument();
-  });
-
-  it("真实用户没有「模拟消耗」，但有「重置」；重置要把邮箱原样打一遍才点得动", async () => {
-    setDetail({ isTest: false, isAdmin: false });
-    resetSpy.mockResolvedValue({ users: 1 });
-    wrap(<AdminPage />);
-    await openUser();
-    const btn = await screen.findByRole("button", { name: "重置为未注册" });
-    expect(screen.queryByRole("button", { name: "模拟消耗" })).toBeNull();
-    expect(btn).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("重置确认邮箱"), { target: { value: "duner@acme.com" } });
-    expect(btn).not.toBeDisabled();
-    fireEvent.click(btn);
-    await vi.waitFor(() => expect(resetSpy).toHaveBeenCalledWith("duner@acme.com", "duner@acme.com"));
-  });
-
-  it("管理员账号没有「重置」", async () => {
-    setDetail({ isAdmin: true });
-    wrap(<AdminPage />);
-    await openUser();
-    await screen.findByRole("button", { name: "模拟消耗" });
-    expect(screen.queryByRole("button", { name: "重置为未注册" })).toBeNull();
-  });
-
-  it("调整按分提交，加和扣都走同一个口", async () => {
-    wrap(<AdminPage />);
-    await openUser();
-    await screen.findByRole("button", { name: "记一笔" });
-    fireEvent.change(screen.getByLabelText("调整金额"), { target: { value: "5" } });
-    fireEvent.change(screen.getByLabelText("调整理由"), { target: { value: "补偿" } });
-    fireEvent.click(screen.getByRole("button", { name: "记一笔" }));
-    await vi.waitFor(() => expect(adjustSpy).toHaveBeenCalledWith("duner@acme.com", 500, "补偿"));
-
-    fireEvent.click(screen.getByRole("button", { name: "扣" }));
-    fireEvent.change(screen.getByLabelText("调整金额"), { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText("调整理由"), { target: { value: "对账纠错" } });
-    fireEvent.click(screen.getByRole("button", { name: "记一笔" }));
-    await vi.waitFor(() => expect(adjustSpy).toHaveBeenCalledWith("duner@acme.com", -300, "对账纠错"));
-  });
-
-  // 三道闸都在后端（同一套规则算两遍必然漂）。前端只负责把后端的原话摆出来——
-  // 「是不是多打了一个零」这种话，改写成「金额超限」就没用了。
-  it("后端拒绝时原样显示它的话，不自己另编一句", async () => {
-    adjustSpy.mockRejectedValue(new Error("单次调整不能超过 $50.00（本次 $500.00）——是不是多打了一个零？"));
-    wrap(<AdminPage />);
-    await openUser();
-    await screen.findByRole("button", { name: "记一笔" });
-    fireEvent.change(screen.getByLabelText("调整金额"), { target: { value: "500" } });
-    fireEvent.change(screen.getByLabelText("调整理由"), { target: { value: "补偿" } });
-    fireEvent.click(screen.getByRole("button", { name: "记一笔" }));
-    expect(await screen.findByText(/是不是多打了一个零/)).toBeInTheDocument();
-  });
-
-  it("在途退款要提示——那部分额度已经被占住了", async () => {
-    setDetail({ pendingRefunds: 2 });
-    wrap(<AdminPage />);
-    await openUser();
-    expect(await screen.findByText(/有 2 笔退款在途/)).toBeInTheDocument();
-  });
-});
-
-
-// ── 增长 Tag（Growth 需求单批次 B）──────────────────────────────────────────────
-const tri = (a: number, b: number, c: number) => ({ thisWeek: a, lastWeek: b, total: c });
-const GROWTH = {
-  week: "2026-W36", range: { thisWeek: ["2026-08-31", "2026-09-06"], lastWeek: ["2026-08-24", "2026-08-30"] },
-  generatedAt: "2026-09-03T12:00+08:00", excluded: { adminAccounts: 1 },
-  ladder: { monthNetUsd: 40, tier: 10, steps: [0, 10, 100, 500, 1000, 5000, 10000] },
-  funnel: {
-    signup: tri(3, 1, 11), signupCorp: tri(1, 0, 3), signupPersonal: tri(2, 1, 6), signupNoQuota: tri(0, 0, 2),
-    signupSources: { thisWeek: { test: 1, unrecorded: 2 }, lastWeek: { unrecorded: 1 }, total: { unrecorded: 10, test: 1 } },
-    referredSignups: tri(1, 0, 1),
-    firstUpload: tri(2, 1, 5), signupToUploadMedianHours: { thisWeek: 2, total: 0 },
-    firstDone: tri(2, 1, 5), freeExhausted: tri(0, 0, 0), firstTopup: tri(0, 1, 1),
-    firstTopupAmounts: { thisWeek: { "10": 0, "30": 0, "60": 0, other: 0 }, total: { "10": 1, "30": 0, "60": 0, other: 0 } },
-    exhaustedToTopupMedianDays: { thisWeek: null, total: null },
-    activePaying: { thisMonth: 0, lastMonth: 1, total: 1 },
-    secondTopup: tri(0, 0, 0), firstToSecondTopupMedianDays: { thisWeek: null, total: null },
-    returnDone: tri(0, 0, 0),
-    soldHours: { thisWeek: 0, lastWeek: 0, thisMonth: 0, lastMonth: 0.5, total: 0.5 },
-  },
-  money: Object.fromEntries(["thisWeek", "lastWeek", "thisMonth", "lastMonth", "total"].map((k) =>
-    [k, { topupCents: k === "thisMonth" ? 4000 : 0, refundCents: 0, netTopupCents: k === "thisMonth" ? 4000 : 0, soldCents: 0 }])),
-  cost: { thisWeek: { cny: 5.05, usdCents: 70, marginPct: null }, lastWeek: { cny: 0, usdCents: 0, marginPct: null },
-          thisMonth: { cny: 5.05, usdCents: 70, marginPct: null }, lastMonth: { cny: 0, usdCents: 0, marginPct: null },
-          usdCnyRate: 7.2, note: "每单成本只含 ASR 与 DeepSeek；Claude 订阅费不在内，毛利率偏乐观" },
-  freeGrantSeries: [{ date: "2026-09-01", corp: 180, personal: 60 }],
-  gifts: { unlocked: tri(1, 0, 1),
-           cents: { thisWeek: { referee: 500, referrer: 500, manual: 0 }, lastWeek: { referee: 0, referrer: 0, manual: 0 }, total: { referee: 500, referrer: 500, manual: 2000 } },
-           referrerClusters: [{ code: "AB2CD3EF", accounts: 4, paid: 2 }], minAccounts: 2 },
-  report: "增长周报 2026-W36 …",
-};
-
-describe("AdminPage · 增长 Tag", () => {
-  beforeEach(() => { growthSpy.mockReset().mockResolvedValue(GROWTH); });
-
-  it("第五个 Tag「增长」在「用户」前面，顶上是本月净充值与台阶，漏斗十行三列", async () => {
-    wrap(<AdminPage />);
-    const tabs = screen.getAllByRole("button").map((b) => b.textContent);
-    expect(tabs.indexOf("增长")).toBeLessThan(tabs.indexOf("用户"));
-    fireEvent.click(screen.getByRole("button", { name: "增长" }));
-    expect((await screen.findAllByText("$40.00")).length).toBeGreaterThan(0);   // 本月净充值（钱的表里也有一格）
-    expect(screen.getByText("$10")).toBeInTheDocument();                     // 台阶
-    expect(screen.getByText("1 注册")).toBeInTheDocument();
-    expect(screen.getByText("8 售出小时")).toBeInTheDocument();
-    expect(screen.getByText(/来源（本周）：/).textContent).toContain("test 1");
-    expect(screen.getByText("经推荐注册")).toBeInTheDocument();
-    expect(screen.getByText("毛利率")).toBeInTheDocument();
-    // 礼金四行（批次 C）：解锁次数 / 发放总额 / 同一推荐人下的账号数——用码不用邮箱
-    expect(screen.getByText("9 礼金解锁（被推荐人首充）")).toBeInTheDocument();
-    expect(screen.getByText(/礼金发放（累计）：/).textContent).toContain("手工 $20.00");
-    // ⚠️ 门槛（≥N）由后端下发（`gifts.minAccounts`），不许在前端写死——2026-09-03 由 3 降到 2
-    expect(screen.getByText(/同一推荐人下 ≥2 个账号：/).textContent).toContain("码 AB2CD3EF 4 个号（2 个充过值）");
-    // ⚠️ 两句话之间必须真的隔开（2026-09-03 生产实见「其他 1免费用尽」「手工 $0.00本周」）。
-    // JSX 会把**紧挨换行**的空白吃掉——行首行尾都算，而 JS 的 `\s` 包含全角空格 U+3000，
-    // 所以分隔符只能写成表达式容器 `{"　"}`。⚠️ 判据是**分隔符在不在**（正向），
-    // 不是「有没有糊在一起」（反向）：第一版写成反向正则，而两句之间本来就隔着一个半角空格，
-    // 正则永远匹配不上 —— 代码没修好、测试却是绿的，浏览器一开就看见还糊着。
-    const body = document.body.textContent ?? "";
-    for (const sep of ["　免费用尽 →", "　本周：", "　同一信箱的自荐"]) {
-      expect(body, `分隔符没了，两句话会糊在一起：${sep}`).toContain(sep);
-    }
-    expect(growthSpy).toHaveBeenCalledWith("", false);
-  });
-
-  it("「含测试号」开关会带参数重新取数——它是临时看礼金那几行动不动的口子", async () => {
-    wrap(<AdminPage />);
-    fireEvent.click(screen.getByRole("button", { name: "增长" }));
-    await screen.findByText("1 注册");
-    fireEvent.click(screen.getByLabelText("含测试号"));
-    await vi.waitFor(() => expect(growthSpy).toHaveBeenCalledWith("", true));
-  });
-
-  it("这一页没有任何邮箱——它是给增长团队看的口径", async () => {
-    wrap(<AdminPage />);
-    fireEvent.click(screen.getByRole("button", { name: "增长" }));
-    await screen.findByText("1 注册");
-    const page = document.body.textContent ?? "";
-    // 顶栏/侧栏没有渲染在 AdminPage 里，所以整页正文里出现 @ 就是增长页漏了
-    expect(page.includes("@")).toBe(false);
-  });
-
-  it("「上一周」按后端给的周号往前拨，不自己算日期", async () => {
-    wrap(<AdminPage />);
-    fireEvent.click(screen.getByRole("button", { name: "增长" }));
-    await screen.findByText("1 注册");
-    fireEvent.click(screen.getByRole("button", { name: "← 上一周" }));
-    await waitFor(() => expect(growthSpy).toHaveBeenLastCalledWith("2026-W35", false));
   });
 });

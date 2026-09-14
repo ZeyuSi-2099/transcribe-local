@@ -12,7 +12,6 @@ import { EmptyState, SmallEmpty } from "./EmptyState";
 import { WaveTile, WaveProgress } from "../components/Wave";
 import { useL } from "../lib/i18n";
 import { semantic, fonts, type, space, radius, shadow, motion, layout } from "../styles/tokens";
-import { usd } from "../lib/pricing";
 import { langName } from "../lib/langs";
 import { observedClimb } from "../lib/flow";
 import type { HistoryItem } from "../lib/sampleData";
@@ -50,11 +49,11 @@ interface HistoryPageProps {
 // 其余列宽仍是八门逐一量出来的（2026-08-19），别按中英文改：
 //   状态列 144 —— 最宽是法语「Traitement en cours」134px（德语 125、日语 107 次之）；
 //   计费列 116 —— 最宽是意大利语「Nessun addebito」104px。各留了 10px 余量。
-const COLS = "1fr 144px 138px 84px 92px 116px 44px";
+const COLS = "1fr 144px 138px 84px 92px 44px";   // 本机版：去掉「计费」一列（线上第 6 列 116px）
 // 一行装得下所需的最小宽度：固定六列 618 + 文件名列至少 170 + 行内边距 48。
 // 窗口比这窄时**横向滚动**（表格的通行做法），而不是让祖先的 overflow:hidden 把列裁掉
 // ——被裁的列既看不见也滑不出来，用户看到的是「文件名/语言/时长凭空消失」。
-const ROW_MIN_WIDTH = 836;
+const ROW_MIN_WIDTH = 720;
 
 const mono = (size = 13): React.CSSProperties => ({ fontFamily: fonts.mono, fontSize: size, fontVariantNumeric: "tabular-nums" });
 
@@ -193,7 +192,6 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
           <div>{L("转录于", "When")}</div>
           <div>{L("语言", "Language")}</div>
           <div style={{ textAlign: "right" }}>{L("时长", "Length")}</div>
-          <div style={{ textAlign: "right" }}>{L("计费", "Cost")}</div>
           <div />
         </div>
 
@@ -322,7 +320,7 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
                   }
                   return (
                     <div style={{ display: "flex", alignItems: "center", gap: space.s2, marginTop: 7 }}>
-                      <span style={{ fontSize: 11, fontWeight: 500, padding: "1px 8px", borderRadius: radius.pill, background: semantic.warning.bg, color: semantic.warning.text, flex: "0 0 auto" }}>✦ {L("后处理失败 · 未计费", "Post-processing failed · not billed")}</span>
+                      <span style={{ fontSize: 11, fontWeight: 500, padding: "1px 8px", borderRadius: radius.pill, background: semantic.warning.bg, color: semantic.warning.text, flex: "0 0 auto" }}>✦ {L("后处理失败", "Post-processing failed")}</span>
                       <span style={{ fontSize: 11, color: semantic.text.muted }}>{L("进详情页重试", "retry from the transcript page")}</span>
                     </div>
                   );
@@ -333,12 +331,6 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
               <div style={{ ...mono(), color: semantic.text.muted }}>{L(item.d.zh, item.d.en)}</div>
               <div style={{ fontSize: 13, color: semantic.text.secondary }}>{langName(item.lang, L)}</div>
               <div style={{ textAlign: "right", ...mono(), color: pending ? semantic.text.muted : semantic.text.secondary }}>{pending ? "—" : item.dur}</div>
-              {/* 失败行写「未计费」而不是「—」：状态列已经不带这半句了，钱的话得有个地方说。
-                  文字走 sans（mono 是给数字对齐用的），排队中仍是「—」——那是还没算出来，不是不收。 */}
-              <div style={{ textAlign: "right", ...(item.st === "failed" ? type.bodySm : mono()), color: item.st === "failed" || pending ? semantic.text.muted : semantic.text.primary }}>
-                {item.st === "failed" ? L("未计费", "No charge") : queued ? "—" : proc ? `≈ ${usd(item.cost)}` : usd(item.cost)}
-              </div>
-
               {/* 行尾：只有 hover 时的「›」（整行可点提示）。重试在文件名格里，下载统一走详情页 */}
               <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
                 {done && hov && <span aria-hidden style={{ color: semantic.text.muted, fontSize: 14 }}>›</span>}

@@ -16,6 +16,7 @@ import { appEs } from "./app.es";
 import { appIt } from "./app.it";
 import { appPt } from "./app.pt";
 import { appJa } from "./app.ja";
+import { LOCAL_OVERRIDES } from "./local";
 import type { UILang } from "../i18n";
 
 const SRC = join(__dirname, "..", "..");
@@ -33,14 +34,24 @@ describe("应用内对照本", () => {
     expect(KEYS.size).toBeGreaterThan(300);
     expect(KEYS.has("Upload audio — a transcript ready to use")).toBe(true);   // L("中","英")
     expect(KEYS.has("{0} left to confirm")).toBe(true);                         // L.t 模板
-    expect(KEYS.has("We sent a 6-digit code to {0}.")).toBe(true);              // L.x 富文本
+    expect(KEYS.has("Can't reach the local service")).toBe(true);             // 本机版：登录卡不搬，换一句本地的
     expect(KEYS.has("Just now")).toBe(true);                                    // { zh, en } 数据对
     // 管理页是内部后台，不在范围内（Duner 定）
     expect([...KEYS.keys()].some((k) => k.includes("Auto top-up"))).toBe(false);
   });
 
+  // 本机版：六本对照本原样同步线上，而登录、充值、账单、推荐这些页面本地不搬——
+  // 那些句子在本地源码里本来就找不到。「原文改了而译文没跟」这条由线上仓守；
+  // 这里只守本地自己加的句子（local.ts）：每一句都得真的在本地源码里。
+  it("本地新增的译文，每一句都能在源码里找到", () => {
+    for (const [lang, book] of Object.entries(LOCAL_OVERRIDES)) {
+      const stale = Object.keys(book ?? {}).filter((k) => !KEYS.has(k));
+      expect(stale, `${lang} 的 local.ts 有句子在源码里找不到`).toEqual([]);
+    }
+  });
+
   for (const [lang, book] of HANDWRITTEN) {
-    it(`${lang}：对照本里的每一句都能在源码里找到`, () => {
+    it.skip(`${lang}：对照本里的每一句都能在源码里找到（本机版由线上仓守）`, () => {
       const stale = Object.keys(book).filter((k) => !KEYS.has(k));
       expect(
         stale,

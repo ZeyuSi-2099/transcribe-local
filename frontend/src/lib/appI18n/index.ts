@@ -15,7 +15,9 @@
 //   · 只有已放量的语言（LIVE_APP_LANGS）要求 100% 覆盖，未放量的可以只翻一半——灰度就是这么做的。
 import type { UILang } from "../i18n";
 import { ALL } from "../langs";
-import { LANG_NAME_OVERLAYS } from "../../screens/marketing/i18n/dataOverlay";
+// 本机版：语种名表从营销站的数据文件抽到本目录（不搬营销站），本地新增文案的译文另放 local.ts
+import { langNamesDe, langNamesEs, langNamesFr, langNamesIt, langNamesJa, langNamesPt, type LangNameOverlay } from "./langNames";
+import { LOCAL_OVERRIDES } from "./local";
 import { appDe } from "./app.de";
 import { appFr } from "./app.fr";
 import { appEs } from "./app.es";
@@ -25,6 +27,10 @@ import { appJa } from "./app.ja";
 
 /** 英文原句 → 译文。key 必须与源码里 L() 的第二个实参逐字一致（含标点与空格）。 */
 export type AppOverride = Record<string, string>;
+
+const LANG_NAME_OVERLAYS: Partial<Record<UILang, LangNameOverlay>> = {
+  de: langNamesDe, fr: langNamesFr, es: langNamesEs, it: langNamesIt, pt: langNamesPt, ja: langNamesJa,
+};
 
 /**
  * 27 门语种名（音频语言选择器、历史表的语言列）不在对照本里另抄一份 ——
@@ -38,12 +44,12 @@ function langNameEntries(lang: UILang): AppOverride {
 }
 
 export const APP_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
-  de: { ...langNameEntries("de"), ...appDe },
-  fr: { ...langNameEntries("fr"), ...appFr },
-  es: { ...langNameEntries("es"), ...appEs },
-  it: { ...langNameEntries("it"), ...appIt },
-  pt: { ...langNameEntries("pt"), ...appPt },
-  ja: { ...langNameEntries("ja"), ...appJa },
+  de: { ...langNameEntries("de"), ...appDe, ...LOCAL_OVERRIDES.de },
+  fr: { ...langNameEntries("fr"), ...appFr, ...LOCAL_OVERRIDES.fr },
+  es: { ...langNameEntries("es"), ...appEs, ...LOCAL_OVERRIDES.es },
+  it: { ...langNameEntries("it"), ...appIt, ...LOCAL_OVERRIDES.it },
+  pt: { ...langNameEntries("pt"), ...appPt, ...LOCAL_OVERRIDES.pt },
+  ja: { ...langNameEntries("ja"), ...appJa, ...LOCAL_OVERRIDES.ja },
 };
 
 /**

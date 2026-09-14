@@ -31,7 +31,8 @@ describe("HistoryPage", () => {
     // 状态胶囊只说状态，「未计费」在计费列——2026-08-19 拆开的，合在一起时德语/意大利语/
     // 葡语的胶囊装不下 132px 的状态列，会裂成两行。两半都得在，缺一半就是信息丢了。
     expect(screen.getByText(/^失败$|^Failed$/, { selector: "span" })).toBeInTheDocument();
-    expect(screen.getByText(/未计费|No charge/)).toBeInTheDocument();
+    // 本机版：没有计费列，失败行也不说「未计费」
+    expect(screen.queryByText(/未计费|No charge/)).toBeNull();
   });
   it("opens a done row", async () => {
     const onOpen = vi.fn();

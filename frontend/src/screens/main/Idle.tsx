@@ -1,4 +1,5 @@
 // Idle.proposed.tsx — 上传页 · 设计系统 v1 版
+// 本机版（与线上不同）：去掉费用预估、余额软墙与免费额度（本机不收费）；本地不支持的语言在 LangPicker 里标灰。
 // 对照稿：《屏幕03 · 上传页 · 对比》
 // 变更：
 //  1. 余额软墙提前到卡内：选中文件后若 预估费用 > 余额，就地显示预警条，
@@ -13,7 +14,6 @@ import { useRef, useState } from "react";
 import { semantic, fonts, type, space, radius, shadow, motion } from "../../styles/tokens";
 import { useL } from "../../lib/i18n";
 import { fmtClock } from "../../lib/format";
-import { rateFor, usd, RATE_PER_HOUR } from "../../lib/pricing";
 import { Button } from "../../components/Button";
 import { RecentPanel, FirstRunPanel } from "./RecentPanel";
 import type { HistoryItem } from "../../lib/sampleData";
@@ -25,14 +25,10 @@ interface IdleProps {
   onStart: (file: File, durationSec: number | null) => void;
   lang: string;
   setLang: (id: string) => void;
-  balance: number;
-  onTopUp?: (suggested: number) => void;
   glossaries?: Glossary[];                 // 全部术语库（选择器用）
   selectedGlossaryId?: string | null;      // 本次转录用哪本（null = 不使用）
   onSelectGlossary?: (id: string | null) => void;
   onOpenGlossary?: () => void;             // 跳术语库整页
-  freeLeftSeconds?: number;                // 免费额度剩余秒；预估与软墙都要算入抵扣
-  freeLimited?: boolean;                   // IP 闸触发：额度 0 + 「同网络已有试用」提示
   /** 已完成的转录（最近的排在前）。左栏拿它当「你的东西」，没有就整卡居中——见下方注释。
    *  ⚠️ `undefined` 与 `[]` **不是一个意思**：前者＝还没从后端拉回来，后者＝确实一份都没有。
    *  混成一个的话，有历史的老用户每次进这一屏都会先单栏居中、再跳成两栏。 */
@@ -77,7 +73,7 @@ const FileGlyph = () => (
 
 const monoNum: React.CSSProperties = { fontFamily: fonts.mono, fontVariantNumeric: "tabular-nums" };
 
-export function Idle({ onStart, lang, setLang, balance, onTopUp, glossaries, selectedGlossaryId, onSelectGlossary, onOpenGlossary, freeLeftSeconds, freeLimited, recent, onOpenRecent, onOpenHistory }: IdleProps) {
+export function Idle({ onStart, lang, setLang, glossaries, selectedGlossaryId, onSelectGlossary, onOpenGlossary, recent, onOpenRecent, onOpenHistory }: IdleProps) {
   const L = useL();
   const [drag, setDrag] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -113,17 +109,6 @@ export function Idle({ onStart, lang, setLang, balance, onTopUp, glossaries, sel
     if (f) ingest(f);
     e.target.value = "";
   };
-
-  // 单价（分/分钟口径，用于算预估费用）；27 门同价，lang 现在不影响结果。
-  // 展示一律按小时（RATE_PER_HOUR），别把这个数直接印到界面上。
-  const rate = rateFor(lang);
-  // 免费额度抵扣（预估口径，权威在后端事务里）：先抵免费秒，剩余按单价。
-  // 不按文件长短设门槛——额度本来就是用多少扣多少，长文件只是把额度一次用完
-  const freeUseSec = durSec != null
-    ? Math.min(Math.max(0, freeLeftSeconds ?? 0), durSec) : 0;
-  const cost = durSec != null ? (Math.max(0, durSec - freeUseSec) / 60) * rate : null;
-  const shortfall = cost != null ? Math.max(0, cost - balance) : 0;
-  const blocked = cost != null && shortfall > 0; // 软墙：提前画在卡里（免费覆盖的部分不算钱）
 
   // 顶层布局：grid 两列（hero | 上传卡），垂直居中。
   // margin:auto 在这里是安全的：free space 为负时 auto 外边距按 0 算（2026-08-21 实测），
@@ -243,94 +228,18 @@ export function Idle({ onStart, lang, setLang, balance, onTopUp, glossaries, sel
               <button className="tx-focus" onClick={() => { setFile(null); setDurSec(null); }} aria-label={L("移除", "Remove")} style={{ border: 0, background: semantic.surface.sunken, color: semantic.text.muted, fontSize: 12, cursor: "pointer", width: 28, height: 28, borderRadius: 7, display: "grid", placeItems: "center" }}>✕</button>
             </div>
 
-            {/* 预估卡：数字 mono + tabular */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: space.s2, margin: `${space.s3}px 0` }}>
-              <div style={{ background: semantic.surface.raised, border: `1px solid ${semantic.border.default}`, borderRadius: radius.sm, padding: `${space.s3}px ${space.s3}px` }}>
-                <div style={{ ...type.label }}>{L("音频时长", "Length")}</div>
-                <div style={{ ...type.monoStat, color: semantic.text.primary, marginTop: 4 }}>{durSec != null ? fmtClock(durSec) : "—"}</div>
-              </div>
-              <div style={{ background: semantic.surface.raised, border: `1px solid ${semantic.border.default}`, borderRadius: radius.sm, padding: `${space.s3}px ${space.s3}px` }}>
-                <div style={{ ...type.label }}>{L("预估费用", "Est. cost")}</div>
-                <div style={{ ...type.monoStat, color: blocked ? semantic.warning.text : semantic.text.primary, marginTop: 4 }}>
-                  {cost != null ? usd(cost) : "—"}
-                </div>
-                {/* 单价独占一行：挤在预估数字后面会断行。
-                    ⚠️ 单位是**小时**——站上其余每一处（左栏 / 定价页 / 条款 / 充值浮窗）都按小时报价，
-                    这里若改回按分钟，同一屏上会并排出现两个相差六十倍的数，读者要自己换算才知道贵不贵。
-                    （注释里不许出现金额字面量：pricing.guard 扫全文，复述被禁的写法会当场自伤。） */}
-                <div style={{ ...monoNum, fontSize: 11, color: semantic.text.muted, marginTop: 2, whiteSpace: "nowrap" }}>
-                  {usd(RATE_PER_HOUR)}/{L("小时", "hour")}
-                  {freeUseSec > 0 && (
-                    <span style={{ color: semantic.success.text, marginLeft: 5 }}>
-                      {L.t("已抵免费 {0}", "free −{0}", fmtClock(freeUseSec))}
-                    </span>
-                  )}
-                </div>
-              </div>
+            {/* 本机版：只报时长，不报费用 */}
+            <div style={{ background: semantic.surface.raised, border: `1px solid ${semantic.border.default}`, borderRadius: radius.sm, padding: `${space.s3}px ${space.s3}px`, margin: `${space.s3}px 0` }}>
+              <div style={{ ...type.label }}>{L("音频时长", "Length")}</div>
+              <div style={{ ...type.monoStat, color: semantic.text.primary, marginTop: 4 }}>{durSec != null ? fmtClock(durSec) : "—"}</div>
             </div>
 
-            {durSec == null ? (
-              <div style={{ fontSize: 12, color: semantic.text.muted, margin: `-${space.s1}px 0 ${space.s3}px` }}>{L("读不出时长——转录开始后按实际时长计费。", "Couldn't read length — billed by actual duration once started.")}</div>
-            ) : (
-              // 取整规则要在花钱的当下讲，不能只写在定价页。
-              // ⚠️ 两句短话、各说一件事（2026-09-01 改）。原来是一句「按秒计费，不足一分钟不按一分钟算；
-              // 以服务端实测时长结算。」——「不按一分钟算」是双重否定，读一遍要在脑子里绕一圈；
-              // 「服务端实测」是我们内部的说法，用户既不知道那指什么，也不关心是谁测的。
-              // 两句都只讲**对他有什么影响**：不会多收；最后按真实时长找齐。
-              <div style={{ fontSize: 12, color: semantic.text.muted, margin: `-${space.s1}px 0 ${space.s3}px`, lineHeight: 1.6 }}>
-                {L("按秒计费，不向上取整。", "Billed by the second, never rounded up.")}<br />
-                {L("转录完成后按实际时长结算，多退少补。", "Settled on the actual length when it's done — any difference comes back.")}
-              </div>
-            )}
-
-            {/* 软墙预警（提前到卡内；红线：余额不够不能开始） */}
-            {blocked && (
-              // 行内紧凑警告条（设计稿 04 出错）：26px 暖金图标块 + 一句原因；主出口 = 下方「先充值」整宽键
-              <div style={{ display: "flex", alignItems: "center", gap: space.s3, background: semantic.surface.raised, border: `1px solid ${semantic.border.subtle}`, borderLeft: `3px solid ${semantic.warning.icon}`, borderRadius: radius.sm, padding: `${space.s3}px ${space.s3}px`, marginBottom: space.s3 }}>
-                <span aria-hidden style={{ flex: "0 0 auto", width: 26, height: 26, borderRadius: 7, background: semantic.warning.bg, color: semantic.warning.text, display: "grid", placeItems: "center", fontSize: 14 }}>⚠</span>
-                <span style={{ fontSize: 12, lineHeight: 1.6, color: semantic.text.secondary }}>
-                  {L("预估 ", "Est. ")}<span style={monoNum}>{usd(cost!)}</span>{L(" 超出余额 ", " exceeds your balance ")}<span style={monoNum}>{usd(balance)}</span>{L("，还差 ", " — ")}<b style={{ ...monoNum, color: semantic.warning.text }}>{usd(shortfall)}</b>{L("。文件已就绪，充值后一键开始。", " short. Your file is ready — top up and start.")}
-                </span>
-              </div>
-            )}
-
-            {blocked ? (
-              <Button primary full size="lg" onClick={() => onTopUp?.(Math.ceil(shortfall))}>{L("先充值", "Top up first")} &nbsp;→</Button>
-            ) : (
-              <Button primary full size="lg" onClick={() => onStart(file, durSec)}>{L("开始转录", "Start")} &nbsp;→</Button>
-            )}
-            <div style={{ fontSize: 12, color: semantic.text.muted, textAlign: "center", marginTop: space.s2 }}>
-              {blocked
-                ? L("充值弹窗会带入缺口金额，完成后回到这里直接开始", "The top-up dialog is pre-filled; you'll come right back here")
-                : cost != null
-                ? L.x("余额 {0}，转录后约剩 {1}", "Balance {0} → about {1} after",
-                    <span key="b" style={monoNum}>{usd(balance)}</span>, <span key="a" style={monoNum}>{usd(balance - cost)}</span>)
-                : null}
-            </div>
+            <Button primary full size="lg" onClick={() => onStart(file, durSec)}>{L("开始转录", "Start")} &nbsp;→</Button>
           </div>
         )}
 
         {/* 卡脚 */}
         <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: space.s4, paddingTop: space.s4, borderTop: `1px solid ${semantic.border.subtle}` }}>
-          {/* 免费额度状态：有余量报数；IP 闸触发（limited）报「同网络已有试用」——两者互斥 */}
-          {/* ⚠️ 免费额度报**分钟**，不报 fmtClock 的 1:27:00（2026-08-31）：
-              额度本来就是按分钟发的（企业邮箱 180 分钟 / 个人 60 分钟），
-              用户收到的邮件里也是分钟——界面上却要他自己把 1:27:00 换算回 87。
-              时钟格式该留给「这段录音多长」那种真正的时间轴（上面的文件时长仍是它）。
-              向下取整不四舍五入：这是我们欠用户的额度，宁可少报不可多报。 */}
-          {(freeLeftSeconds ?? 0) > 0 && (
-            <span style={{ fontSize: 11, color: semantic.success.text }}>
-              {/* 剩不到一分钟报「< 1」不报「0」：这一行只在还有额度时才显示，写「0 分钟」
-                  等于自己跟自己打架。占位符吃字符串，八门译文一个字都不用改。 */}
-              {L.t("免费额度剩余 {0} 分钟", "Free quota left: {0} min",
-                   Math.floor(freeLeftSeconds! / 60) >= 1 ? Math.floor(freeLeftSeconds! / 60) : "< 1")}
-            </span>
-          )}
-          {freeLimited && (
-            <span style={{ fontFamily: fonts.mono, fontSize: 11, color: semantic.text.muted }}>
-              {L("同网络已有试用，联系我们开通团队试用", "This network already has a trial — contact us for a team trial")}
-            </span>
-          )}
           {/* 两行合一行；等宽字也一并去掉——这里没有一列数字要对齐，mono 只贡献「调试输出感」。
               完整扩展名清单挂在 title 上，真要查的人停一下就有。 */}
           <span title={FORMATS} style={{ fontSize: 11, color: semantic.text.muted, lineHeight: 1.7 }}>
