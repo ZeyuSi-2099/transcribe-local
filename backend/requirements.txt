@@ -1,0 +1,22 @@
+# ASR 流水线运行时依赖（跨 P0–P5）
+google-genai==2.8.0
+dashscope
+requests
+oss2
+opencc-python-reimplemented
+python-docx
+pypinyin
+jieba
+# 前台 API + 排队 + 存储（里程碑 B）
+fastapi
+uvicorn[standard]
+python-multipart
+psycopg[binary]
+boto3
+# 错误监控（未配 SENTRY_DSN 则不启用）
+sentry-sdk[fastapi]
+# 测试
+pytest
+ruff
+httpx
+PyYAML
