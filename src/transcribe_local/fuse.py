@@ -592,6 +592,8 @@ def _fuse_claude_p(p3_input: str, found: list[Divergence], cfg: dict, on_batch=N
     print(f"P3  终稿 {len(got)} 行 / 期望 {len(blocks)} 块 · 缺 {len(miss)} 块已填回 · {time.time() - t0:.0f}s")
     if on_batch:
         on_batch(1, 1)
+    # 工作目录下面就要删，报告原文先收下来（复核卡从它解析）
+    p3["_last"]["report_md"] = report.read_text(encoding="utf-8") if report.exists() else ""
     if not keep:
         shutil.rmtree(work, ignore_errors=True)
     return "\n".join(lines) + "\n"
@@ -631,3 +633,22 @@ def fuse(p3_input: str, found: list[Divergence], cfg: dict, on_batch=None) -> st
     if backend != "openai":
         raise RuntimeError(f"未知的 p3.backend：{backend}（可选 openai | claude_p）")
     return _fuse_openai(p3_input, found, cfg, on_batch)
+
+
+def report(cfg: dict) -> str:
+    """最近一次融合的定字报告，格式与线上一致 —— 复核队列的卡片从它解析（线上 review.parse_review）。
+
+    两阶段分批：照线上 Phase3_Merge_DeepSeek_Batched.py 拼 = 阶段一的〈实体定字〉〈联网核实〉+ 各批汇总的〈存疑〉。
+    claude_p：模型自己写的报告，原样。simple 工作流没有定字表、也不收存疑表 → 空串，
+    复核队列只剩终稿里 [❓] 那一类卡（线上的存疑对账会补出来）。"""
+    p3 = cfg["p3"]
+    last = p3.get("_last") or {}
+    if "report_md" in last:
+        return last["report_md"]
+    if "table" not in last:
+        return ""
+    doubts = last.get("doubts") or []
+    doubt_tbl = ("| 时间码 | 终稿写法 | 原因 |\n|---|---|---|\n" + "\n".join(doubts)) if doubts else "无"
+    return (f"# P3 Merge 报告\n\n- **引擎**：{p3.get('model')}（分批产出：{last.get('rounds')} 轮 × "
+            f"{p3.get('round_tokens', 2100)} token）\n\n"
+            f"{last['table'].strip()}\n\n## 存疑 [❓]\n\n{doubt_tbl}\n")

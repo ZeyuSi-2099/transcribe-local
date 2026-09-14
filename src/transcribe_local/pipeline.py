@@ -29,6 +29,7 @@ class Result:
     fillers: int = 0
     uncertain: int = 0                                          # 终稿里 [❓] 的处数
     merged: str = ""
+    report: str = ""          # 定字报告（线上格式），复核卡从它解析；simple 工作流为空
     ledger: str = ""          # 分歧册原文，结果页拿它把 [❓] 展开成各路候选
     exports: list[Path] = field(default_factory=list)
     seconds: float = 0.0
@@ -139,6 +140,9 @@ def run(audio: Path, out: Path, cfg: dict, *, no_fuse: bool = False, emit=None) 
     r.merged = fuse.fuse(p3in, found, cfg,
                          on_batch=lambda n, N: say("batch", done=n, total=N))
     (out / f"{r.stem}.merged.md").write_text(r.merged, encoding="utf-8")
+    r.report = fuse.report(cfg)
+    if r.report:
+        (out / f"{r.stem}.report.md").write_text(r.report, encoding="utf-8")
     r.uncertain = r.merged.count("[❓]")
     say("fused", lines=len(r.merged.splitlines()), uncertain=r.uncertain, seconds=round(time.time() - t))
 

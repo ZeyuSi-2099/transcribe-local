@@ -106,6 +106,22 @@ def test_two_stage_end_to_end_with_mocked_calls(monkeypatch):
     assert cfg["p3"]["_last"]["rounds"] >= 2
 
 
+def test_report_follows_saas_skeleton():
+    """报告 = 阶段一的定字表 + 各批汇总的存疑表，节名与列同线上（复核卡靠它解析）。"""
+    cfg = _cfg()
+    cfg["p3"]["_last"] = {"table": "## 实体定字（硬证据）\n| 时间码 | 各轨候选 | 终稿 | 依据 |\n\n## 联网核实\n共 0 次",
+                          "doubts": ["| 00:05.0 | 清汤锅底 | 三路同音不同字 |"], "rounds": 2}
+    rep = fuse.report(cfg)
+    assert rep.startswith("# P3 Merge 报告\n") and "## 实体定字（硬证据）" in rep and "## 联网核实" in rep
+    assert rep.endswith("## 存疑 [❓]\n\n| 时间码 | 终稿写法 | 原因 |\n|---|---|---|\n| 00:05.0 | 清汤锅底 | 三路同音不同字 |\n")
+    cfg["p3"]["_last"]["doubts"] = []
+    assert fuse.report(cfg).endswith("## 存疑 [❓]\n\n无\n")
+    cfg["p3"]["_last"] = {"workflow": "simple"}                          # simple 没有定字表
+    assert fuse.report(cfg) == ""
+    cfg["p3"]["_last"] = {"report_md": "模型自己写的报告"}                  # claude_p 原样
+    assert fuse.report(cfg) == "模型自己写的报告"
+
+
 def test_claude_cmd_matches_saas_and_blocks_user_settings():
     cmd = fuse.claude_cmd("/multi-asr-merge x.md", "opus", "medium")
     assert cmd[:5] == ["env", "-u", "ANTHROPIC_API_KEY", "-u", "ANTHROPIC_AUTH_TOKEN"]

@@ -27,6 +27,12 @@ def _wav(seconds: float = 0.5) -> bytes:
     return buf.getvalue()
 
 
+def test_worker_imports():
+    """后台模块要能导入 —— 它连着定字、后处理一串线上模块，少搬一个文件，服务一启动就报错（接口测试照绿）。"""
+    import importlib
+    importlib.import_module("app.worker")
+
+
 def test_me_is_local_admin(client):
     assert client.get("/api/me").json() == {"email": local.EMAIL, "isAdmin": True}
 

@@ -12,6 +12,9 @@ python-docx
 httpx
 # 运行面板读定字参数
 PyYAML
+# 本地识别层 src/transcribe_local（转录入口 pipeline/local_orchestrator.py 直接导入它；版本下限见根目录 pyproject.toml）
+sherpa-onnx
+numpy
 # 测试
 pytest
 ruff

@@ -38,3 +38,13 @@ def _no_llm_calls(monkeypatch):
         )
 
     monkeypatch.setattr(pp_deepseek, "call", _blocked)
+
+    # 本地识别层的定字：同样一律拦（导入 local_orchestrator 顺带把 src/ 加进 sys.path）
+    from pipeline import local_orchestrator  # noqa: F401
+    from transcribe_local import fuse
+
+    def _blocked_fuse(*_a, **_kw):
+        raise AssertionError("测试试图真的调用定字接口（DeepSeek / 博查）。请 monkeypatch fuse._call 回放编好的产出。")
+
+    monkeypatch.setattr(fuse, "_call", _blocked_fuse)
+    monkeypatch.setattr(fuse, "_bocha", _blocked_fuse)
