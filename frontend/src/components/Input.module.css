@@ -1,0 +1,27 @@
+.input {
+  width: 100%;
+  padding: 14px 0;
+  font-size: 16px;
+  font-family: var(--font-sans);
+  background: transparent;
+  color: var(--c-ink);
+  border: none;
+  border-bottom: 1px solid var(--c-line);
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.input:focus {
+  border-bottom-color: var(--c-ink);
+}
+
+/* 键盘聚焦：这是个**下划线式**输入框，全站那条 2px 方形焦点环套在它外面看着像报错
+   （2026-09-01 穿测实见）。改成把下边框加粗成品牌色——同样看得清「焦点在这儿」，
+   而且是这个控件本来的语言。padding 少 1px 抵消加粗，字不会往上跳。
+   ⚠️ 要盖住全局那条规则，选择器必须比它具体：全局那条已压到优先级 0，这条是 (0,2,0)。 */
+.input:focus-visible {
+  outline: none;
+  border-bottom: 2px solid var(--c-accentDeep);
+  padding-bottom: 13px;
+}

@@ -1,0 +1,76 @@
+/* ⚠️ 手抄镜像 src/styles/tokens.ts — 改了 tokens.ts 的颜色必须同步改这里。
+   一致性由 tokens.css.test.ts 守卫（颜色变量漂移即测试红）。 */
+:root {
+  --c-bg: #F2EDE3;
+  --c-paper: #FBF7EE;
+  --c-panel: #EDE6D7;
+  --c-line: #E2DACA;
+  --c-lineSoft: #DFD5BE;
+  --c-line2: #ECE4D4;
+  --c-ink: #1F1A14;
+  --c-inkMuted: #5A4E3F;
+  --c-inkFaint: #75654F;
+  --c-inkGhost: #B5A88F;
+  --c-accent: #C8553D;
+  /* 承载白字的填充。brand(#C8553D) 上白字只有 4.07:1，不达 AA；fill(#BC4D34) 是 4.62:1。
+     这一档此前只存在于 tokens.ts，CSS 变量层没暴露，于是走 CSS 类的按钮只能退用 brand
+     —— 全站每个主按钮的对比度都因此不达标（2026-08-06 审计 P0-1）。 */
+  --c-accentFill: #BC4D34;
+  --c-accentDeep: #A8442F;
+  --c-accentSoft: #F2D9D1;
+  --c-accentTint: #FAEDE7;
+  --c-ok: #5C7A4E;
+  --c-warn: #A37A2A;
+  --c-borderStrong: #C9BFA9;
+  /* 卡片面 / 浮层面。2026-08-31 各上提一档（见 tokens.ts 的 semantic.surface 注释）。
+     ⚠️ --c-paper 不跟着动：它现在的身份是「深色填充上的反白」，与卡片面语义无关。 */
+  --surface-raised: #FFFCF5;
+  --surface-float: #FFFFFF;
+  --surface-row-active: #F7F1E6;
+  --r-sm: 8px;
+  --r: 11px;
+  --r-lg: 16px;
+  --sh-sm: 0 1px 2px rgba(60, 42, 26, 0.07), 0 4px 12px -8px rgba(60, 42, 26, 0.16);
+  --sh: 0 14px 44px -22px rgba(60, 42, 26, 0.42), 0 3px 10px -5px rgba(60, 42, 26, 0.14);
+  --sh-lg: 0 30px 70px -30px rgba(60, 42, 26, 0.5);
+  /* 拉丁语言的默认栈。衬线绝不能让 CJK 字体打头——它的拉丁字形不是我们要的那套
+     （审计 B1）。CJK 字体只作兜底，让偶尔出现的中日文字符仍有字可用。 */
+  --font-serif: 'Source Serif 4', 'Noto Serif SC', Georgia, serif;
+  --font-serifLat: 'Source Serif 4', 'Noto Serif SC', Georgia, serif;
+  --font-sans: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* 行高。拉丁语言的值——CJK 在 :lang() 块里整体抬一档，见下。
+     `--lh-read` 给要连着读一屏的长文（转录正文、条款正文、示例稿），
+     `--lh-body` 给一般段落（说明、原因、卡片正文）。图标类的 lineHeight:1 不走这里。 */
+  --lh-body: 1.7;
+  --lh-read: 1.75;
+  /* 小型大写标签的字距。拉丁字形靠它撑开才好读；CJK 在 :lang() 块里归零——
+     1.4px 套到中日文上会把「另见」「文件」这种两字标签撑散（见 tokens.ts 的 type.label）。 */
+  --ls-label: 1.4px;
+}
+
+/* CJK 行高统一（2026-08-15）。**一处定，所有 CJK 语言共用**——此前行高是散在各组件里的
+   硬编码（1.65 / 1.7 / 1.75 / 1.85），按拉丁字形调的；CJK 是全宽方块字、没有升降部，
+   同样的数值排出来明显发挬。抬一档后中日文读长稿才不费力。
+   ⚠️ ko 现在还不是界面语言，先写在这里：以后放量时不会有人记得回来补这一条，
+   而漏掉的症状是「韩文页比中日文挤」——没人会报这种 bug，只会觉得不好读。 */
+:root:lang(zh), :root:lang(ja), :root:lang(ko) {
+  --lh-body: 1.8;
+  --lh-read: 1.9;
+  --ls-label: 0;
+}
+
+/* 中日文界面：整句（含其中的拉丁词）交给同一套 CJK 字体，混排才不会一句两种骨架。
+   :lang() 按语言范围匹配，所以 zh 这条同时覆盖 <html lang="zh-CN">。 */
+:root:lang(zh) {
+  --font-serif: 'Noto Serif SC', 'Source Serif 4', Georgia, serif;
+  --font-serifLat: 'Noto Serif SC', 'Source Serif 4', Georgia, serif;
+  --font-sans: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+}
+/* 日文原先一份日文字体都没加载，汉字是拿简体中文字形凑的（审计 B1）。
+   字体本身按需加载，见 lib/cjkFonts.ts。 */
+:root:lang(ja) {
+  --font-serif: 'Noto Serif JP', 'Source Serif 4', Georgia, serif;
+  --font-serifLat: 'Noto Serif JP', 'Source Serif 4', Georgia, serif;
+  --font-sans: 'Inter', 'Noto Sans JP', system-ui, sans-serif;
+}

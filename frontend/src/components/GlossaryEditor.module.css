@@ -1,0 +1,148 @@
+/* 叠层法编辑器：透明 textarea 叠在着色 backdrop 上，逐像素对齐。
+   关键：backdrop 与 textarea 同 font/size/line-height；行号栏宽 = textarea padding-left = 44px。 */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid var(--c-borderStrong);
+  border-radius: var(--r-sm);
+  background: var(--surface-float);
+  overflow: hidden;
+}
+.editor:focus-within {
+  border-color: var(--c-accentDeep);
+  box-shadow: 0 0 0 3px rgba(200, 85, 61, 0.12);
+}
+
+/* 卡内头条（整页：术语｜含义 + 条数 + 状态点） */
+.editorHead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--c-paper);
+  border-bottom: 1px solid var(--c-line);
+}
+
+/* 叠层区：相对定位容器，backdrop 与 textarea 都 inset:0 填满它 */
+.editorArea {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 8px 0; /* 上下各 8px 呼吸；与 textarea 同步偏移以保持逐像素对齐 */
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.inner {
+  will-change: transform;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  min-height: 24px;
+}
+.rowActive {
+  background: var(--surface-row-active);
+  box-shadow: inset 3px 0 0 var(--c-accent);
+}
+.rowOver {
+  background: var(--c-accentTint);
+  box-shadow: inset 3px 0 0 var(--c-accent);
+}
+
+.gutter {
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  padding-right: 8px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 24px;
+  color: var(--c-inkFaint);
+  user-select: none;
+}
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: 16px;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.editorNoGutter .content {
+  padding-left: 16px;
+}
+
+.textarea {
+  position: absolute;
+  inset: 8px 0; /* 与 backdrop 同步：上下 8px 呼吸，左右 0（行号/文字起点不变） */
+  z-index: 2;
+  margin: 0;
+  border: 0;
+  padding: 0 16px 0 44px;
+  box-sizing: border-box;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--c-accent);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  /* 与 global.css 的 .tx-scroll 同一套（这里挂不了全局 class）。改值两边一起改。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-borderStrong) transparent;
+}
+.editorNoGutter .textarea {
+  padding-left: 16px;
+}
+.textarea::selection {
+  background: rgba(200, 85, 61, 0.22);
+}
+
+.overBadge {
+  position: absolute;
+  right: 8px;
+  top: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 24px;
+  pointer-events: none;
+}
+
+/* 紧凑模式（折叠条内联编辑器）：字号更小、行号栏更窄；backdrop 与 textarea 同步保持对齐 */
+.dense .content,
+.dense .textarea {
+  font-size: 12px;
+  line-height: 20px;
+}
+.dense .textarea {
+  padding-left: 28px;
+}
+.dense .gutter {
+  flex: 0 0 28px;
+  font-size: 10px;
+  line-height: 20px;
+}
+.dense .row {
+  min-height: 20px;
+}
+.dense .overBadge {
+  line-height: 20px;
+}

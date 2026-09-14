@@ -1,0 +1,88 @@
+.btn {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.18s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* 禁用态：实色面（废除半透明叠加，叠加在米色底上会发灰泛脏）。
+   文字用 inkFaint 不用 inkGhost（2026-08-31 穿测）：ghost 在 panel 底上只有 1.89:1，
+   登录屏那颗「获取验证码」在新访客眼里读起来是**坏了**，而不是「等你先填邮箱」——
+   而那是整个转化漏斗最窄的一环。inkFaint 是 4.53:1，仍明显轻于启用态，但看得出是一颗
+   真按钮。设计纪律 12 说 ghost 只给占位符与禁用态，这里是那条规则的例外注记：
+   **禁用态里"文字仍要读得出来"优先**——用户得先读懂它要什么才知道怎么让它亮起来。 */
+.btn:disabled {
+  opacity: 1;
+  background: var(--c-panel);
+  color: var(--c-inkFaint);
+  box-shadow: none;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Size variants */
+.sm {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+.md {
+  padding: 12px 20px;
+  font-size: 13px;
+}
+.lg {
+  padding: 18px 32px;
+  font-size: 16px;
+}
+
+.full {
+  width: 100%;
+}
+
+/* Variant: primary
+   底色用 accentFill 而不是 accent：白字在 accent 上只有 4.07:1，在 accentFill 上 4.62:1。 */
+.primary {
+  background: var(--c-accentFill);
+  color: var(--c-paper);
+  box-shadow: 0 10px 24px -12px rgba(200, 85, 61, 0.75);
+}
+.primary:not(:disabled):hover {
+  background: var(--c-accentDeep);
+  transform: translateY(-1px);
+}
+
+/* Variant: secondary */
+.secondary {
+  background: transparent;
+  color: var(--c-ink);
+  border: 1px solid var(--c-borderStrong);
+}
+.secondary:not(:disabled):hover {
+  border-color: var(--c-ink);
+}
+
+/* Variant: ghost */
+.ghost {
+  background: transparent;
+  color: var(--c-inkMuted);
+}
+.ghost:not(:disabled):hover {
+  color: var(--c-ink);
+}
+
+/* Variant: default (none of the above) */
+.default {
+  background: transparent;
+  color: var(--c-ink);
+}
+.default:not(:disabled):hover {
+  background: var(--c-ink);
+  color: var(--c-paper);
+}

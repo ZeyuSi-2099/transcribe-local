@@ -25,6 +25,8 @@ build/
 .ruff_cache/
 
 # Tauri / 前端
+/frontend/node_modules/
+/frontend/dist/
 /web/node_modules/
 /web/dist/
 /web/src-tauri/target/

@@ -22,21 +22,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import saas_scan as S  # noqa: E402
 
 # 线上路径前缀 → 本仓路径前缀
-PARTS = {"backend": ("server/", "backend/")}
+# 线上路径前缀 → 本仓路径前缀。以「/」结尾的是目录前缀，否则是单个文件。
+# 界面放 frontend/：线上的 src/ 在仓库根，本仓根目录的 src/ 已经是识别层的 Python 包。
+PARTS = {
+    "backend": [("server/", "backend/")],
+    "frontend": [("src/", "frontend/src/"), ("public/", "frontend/public/"),
+                 ("index.html", "frontend/index.html"), ("package.json", "frontend/package.json"),
+                 ("package-lock.json", "frontend/package-lock.json"), ("vite.config.ts", "frontend/vite.config.ts"),
+                 ("tsconfig.json", "frontend/tsconfig.json")],
+}
+
+
+def _map(p: str, part: str) -> str | None:
+    for src, dst in PARTS[part]:
+        if p == src or (src.endswith("/") and p.startswith(src)):
+            return dst + p[len(src):]
+    return None
 
 
 def plan(saas_files: list[str], rules: list[dict], part: str, root: Path = S.ROOT) -> list[tuple[str, Path | None, str]]:
     """每个线上文件 → (线上路径, 本仓目标, 动作)。动作：复制 / 覆盖 / 本地已有 / 不拿 / 未登记。"""
-    src, dst_prefix = PARTS[part]
     out = []
     for p in saas_files:
-        if not p.startswith(src):
+        target = _map(p, part)
+        if target is None:
             continue
         r = S.classify(p, rules)
         if r is None:
             out.append((p, None, "未登记"))
             continue
-        dst = root / (dst_prefix + p[len(src):])
+        dst = root / target
         if r["as"] == "skip":
             act = "不拿"
         elif r["as"] == "same":

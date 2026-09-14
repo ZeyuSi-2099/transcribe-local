@@ -1,0 +1,153 @@
+@import "./tokens.css";
+
+/* 默认：**文档自己滚**（浏览器原生）。公开站走这一套——
+   原先整站是「页面钉死成一屏、里面挖个 div 自己滚」，代价是浏览器免费送的东西全没了：
+   键盘翻页要靠给容器程序化聚焦补回来、锚点定位要自己写、返回时的滚动位置不恢复、
+   iOS 上地址栏不收起。2026-08-06 按 SEO/可用性审计 C9 改回原生。
+   登录后的应用**仍然要满屏不滚**（侧栏 + 各自滚动的分栏），由 html.tx-app 打开那一套。 */
+html, body { margin: 0; padding: 0; min-height: 100%; font-family: var(--font-sans); }
+html { scroll-behavior: smooth; }
+/* 顶栏是 sticky 的，锚点跳过去别被它盖住（/terms#refund 就靠这个） */
+:target { scroll-margin-top: 84px; }
+/* 应用外壳：满屏、自身不滚 */
+html.tx-app, html.tx-app body { height: 100%; overflow: hidden; }
+html.tx-app #root { height: 100%; }
+body {
+  /* 暖色径向渐变底，营造氛围（替代纯色平涂） */
+  background:
+    radial-gradient(120% 90% at 88% -6%, #FBF7EE 0%, rgba(251, 247, 238, 0) 44%),
+    radial-gradient(100% 80% at 0% 110%, var(--c-panel) 0%, transparent 50%),
+    var(--c-bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* 减少孤字尾行 / 半词换行（支持的浏览器；不支持则自然降级） */
+  text-wrap: pretty;
+}
+#root { min-height: 100%; }
+*, *::before, *::after { box-sizing: border-box; }
+button { font-family: inherit; }
+::selection { background: var(--c-accent); color: var(--c-paper); }
+
+/* ——— 动画 keyframes（FusionViz / 进度流光 / spinner / 呼吸点 / 入场）——— */
+@keyframes floatUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes barPulse { 0%, 100% { transform: scaleY(.32); } 50% { transform: scaleY(1); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulseDot { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+@keyframes toastUp { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes skel { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes ring {
+  0% { box-shadow: 0 0 0 0 var(--c-accentSoft); }
+  70% { box-shadow: 0 0 0 7px rgba(200, 85, 61, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(200, 85, 61, 0); }
+}
+/* 面板入场：比 floatUp 收敛（8px），用于右栏这种「原地长出来一块」的场合 */
+@keyframes riseIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  /* transition 也要压平：只压 animation 的话，展开/收拢这类用 transition 做的位移照样在动 */
+  html { scroll-behavior: auto; }
+  * {
+    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important; transition-delay: 0s !important;
+  }
+}
+
+/* ——— 设计系统 v1：键盘焦点圈 + 细滚动条（docs/design/system/HANDOFF-BACK.md §2）———
+
+   ⚠️ 焦点环必须是**全站默认**，不能靠逐个组件挂 `.tx-focus`（2026-08-31 穿测）。
+   在此之前只有挂了那个类的元素有品牌焦点环，其余走浏览器默认——于是同一屏上会并排出现
+   两种焦点环（默认的 1px 蓝 vs 我们的 2px 赤陶）。键盘用户看到的是「有的控件被设计过、
+   有的没有」，而漏挂一个类**不报错、测试也不红**，只有真用 Tab 走一遍才看得见。
+   ⇒ 判据反过来：默认全都有，`.tx-focus` 退化成同一条规则的别名（历史调用点原样保留）。
+
+   用 :where() 把优先级压到 0：组件想自己画焦点态（如 GlossaryEditor 的 focus-within）
+   仍然盖得住，而不必先来这里加豁免。
+   **不设 border-radius**：现代浏览器的 outline 自己跟随元素圆角；写死 8px 会把
+   胶囊按钮在获得焦点的那一刻拍成圆角矩形（旧的 .tx-focus 就有这个毛病）。 */
+/* ⚠️ **`:focus-visible` 也要包在 `:where()` 里**（2026-09-01 修）：只包元素名的话这条规则
+   的优先级是 (0,1,0)——与组件里 `.input { outline: none }` 打平，谁在后面谁赢，于是
+   「组件想自己画焦点态仍盖得住」这句话**根本没兑现**。登录屏那个下划线式邮箱框因此被套上
+   一个 2px 赤陶方框：它设计成只有一条下边框，外面再框一圈看着像报错。
+   两层 `:where()` 把优先级压到 0，任何组件规则都赢得过它。 */
+:where(a, button, input, select, textarea, summary, [tabindex]):where(:focus-visible) {
+  outline: 2px solid var(--c-accentDeep);
+  outline-offset: 2px;
+}
+/* 历史调用点：显式挂了这个类的元素照旧，且优先级正常（组件想盖要写得更具体） */
+.tx-focus:focus-visible {
+  outline: 2px solid var(--c-accentDeep);
+  outline-offset: 2px;
+}
+
+/* ——— 复合输入控件：焦点态提到**容器**上（2026-09-01）———
+   有一类控件是「一个裸 input/textarea 装在自己画好的胶囊或卡片里」：胶囊自带边框与圆角，
+   里面那个输入框写着内联 `outline:"none"`。内联优先级最高，上面那条全站规则**盖不住**，
+   于是这些控件键盘聚焦时**一点提示都没有**——这是 08-31 那次修焦点环时漏掉的另一半。
+   为什么不是简单地把 `outline:"none"` 删掉：环会画在容器**内部**（框里套框），
+   铺满卡片的 textarea 还会被卡片的 `overflow:hidden` 从左右两边裁掉，只剩上下两条。
+   ⇒ 环画在容器外，与全站焦点环同款，一屏之内不出现第二种长相。
+   ⚠️ 挂了这个类之后，里面那个 input 的 `outline:"none"` 要**留着**——删了就是两个环。 */
+.tx-field:focus-within {
+  outline: 2px solid var(--c-accentDeep);
+  outline-offset: 2px;
+}
+
+/* 下划线式输入框（只有一条下边框的那种）的容器版：加粗下边框，不套方框。
+   同 Input.module.css 里那条的理由（纪律 15）：方框套在下划线控件上看着像报错。
+   用 inset 阴影而不是改 border-width，两个原因：容器的 border 是内联写的、类盖不住；
+   阴影不占布局，不必像 Input 那样回头补 padding 抵消。 */
+.tx-underline:focus-within {
+  box-shadow: inset 0 -2px 0 var(--c-accentDeep);
+}
+/* 应用内所有滚动容器都必须挂 .tx-scroll——不挂就退回系统原生滚动条（macOS 上 15px 深灰，
+   紧贴内容），同一屏里两种滚动条并存。守卫在 src/lib/layout.guard.test.ts。 */
+.tx-scroll { scrollbar-width: thin; scrollbar-color: var(--c-borderStrong) transparent; }
+.tx-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.tx-scroll::-webkit-scrollbar-thumb { background: var(--c-borderStrong); border-radius: 4px; }
+.tx-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ——— 登录屏 /signin 的两副面孔（2026-08-19）———
+   宽屏：左卖点 + 右登录卡（1fr 468px）。窄屏：卖点收起、登录卡铺满、页面可纵向滚。
+
+   **必须走 CSS 媒体查询，不能用 JS 量宽度**：/signin 是构建期预渲染的 264 个网址之一，
+   Node 里没有 window，JS 判定一律得到「宽屏」——手机拿到的 HTML 会是宽屏版，等 JS 跑起来
+   才跳变一次。营销页顶栏当初就是这么解决的（mk.ts 的 @media）。
+
+   断点 900px：登录卡 468 + 卖点列至少 300 + 间距 40 = 808，808~900 之间卖点列已经挤得
+   没法读，索性一起收起。这里是**布局重排**（窗口拖窄就该重排，行业通行），与登录后应用那道
+   「按设备劝退」的墙是两回事，别把两者的阈值混为一谈。 */
+.tx-login-shell { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.tx-login-head { padding: 22px 42px; display: flex; justify-content: space-between; align-items: center; }
+.tx-login-body { flex: 1; min-height: 0; overflow-y: auto; padding: 32px 64px; display: flex; flex-direction: column; min-width: 0; }
+.tx-login-grid {
+  display: grid; grid-template-columns: 1fr 468px; gap: clamp(40px, 6vw, 80px);
+  align-items: center; width: 100%; max-width: 1180px; margin: auto; min-width: 0;
+}
+.tx-login-foot { padding: 16px 42px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.tx-login-links { display: flex; gap: 20px; align-items: center; }
+
+@media (max-width: 900px) {
+  /* 单列：卖点收起，登录卡自己撑满（上限仍是 468，别在大平板上拉成一条）。
+     margin:auto 在单列下会把卡片垂直居中并顶出滚动条，改成靠上排。 */
+  .tx-login-grid { grid-template-columns: minmax(0, 468px); justify-content: center; margin: 0 auto; }
+  .tx-login-pitch { display: none; }
+  .tx-login-body { padding: 24px 20px 40px; }
+  .tx-login-head { padding: 16px 20px; }
+  /* 高度不再钉死一屏——单列后内容更高，锁死会让按钮够不着 */
+  .tx-login-shell { overflow: auto; }
+  /* 页脚四条链接 + 版权在 390px 下排不开：换行居中，别把版权挤出视口 */
+  .tx-login-foot { flex-direction: column; align-items: flex-start; padding: 16px 20px; }
+  .tx-login-links { flex-wrap: wrap; gap: 12px 16px; }
+}
+
+/* 占位符一律 ghost 灰、常规字重：大号 mono 输入框（充值自定义金额）里，
+   浏览器默认的占位符颜色在纸面上看着像**已经填了值**——旁边选中的是 $30、
+   框里"写着"100，一眼扫过去像「填了 100 却要扣 30」（2026-08-22 巡检）。
+   设计纪律 12：ghost 只给占位符与禁用态，正合此处。 */
+input::placeholder, textarea::placeholder { color: var(--c-inkGhost); font-weight: 400; opacity: 1; }
+
+/* 点正文标记词后右栏把那张卡「亮出来」：滚过去并闪 1.4 秒（Result.tsx revealCard）。
+   卡片外层的 box-shadow 是内联写的、样式表盖不过，所以用 outline——它不占布局、跟随圆角。 */
+[data-review-card][data-flash="1"] { outline: 3px solid rgba(200, 85, 61, .28); outline-offset: 0; transition: outline-color .2s; }
