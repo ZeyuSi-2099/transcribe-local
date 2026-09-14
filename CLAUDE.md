@@ -145,6 +145,13 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 - [ ] **多人录音（三人及以上）。** 目标场景是座谈会、多人访谈，把说话人识别做准。现在 `diarize.num_clusters` 写死 2。
       单独立项；内部仓已有一条 2 小时 49 分的三人素材，但没有标准答案。
 
+**与线上 SaaS 同步**
+
+- [ ] **线上遗留问题：删除全部转录 / 注销被拒时报 500。** 线上 `server/app/api.py` 两处 `UserError(422, e.code)`，
+      而 `DeleteRejected` 没有 `code` 属性 —— 有任务在跑时点删除，用户看不到「还有任务在进行中」那句，只看到出错。
+      本地 `backend/app/api.py` 的删除转录已改为 422 带原话并补了测试；线上暂不改（Duner 2026-09-14 定为远期）。
+      线上修了之后，本地这一处跟着同步回线上写法。
+
 **部署**
 
 - [ ] **fly.io 云端省内存版本。** 优先 ONNX 类引擎、控制常驻内存。排在所有事项的最后。
