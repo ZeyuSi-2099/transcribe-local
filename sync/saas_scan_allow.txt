@@ -1,0 +1,37 @@
+# saas_scan.py 的放行清单：逐条人工看过、确认可以公开的命中。
+# 格式：线上文件路径 <TAB> 规则 <TAB> 行指纹  # 理由
+# ⛔ 只记指纹与理由，不记命中的原文；行一改指纹就变，要重新看。
+# 2026-09-14 第 1 步清点时人工确认。
+
+server/app/api.py	私有词表	5ccb6c06cf08  # 讲磁盘保护的普通词，撞上词表
+server/app/api.py	私有词表	6b7a19e767bd  # 讲磁盘保护的普通词，撞上词表
+server/app/schema.sql	邮箱	d43e370d7e62  # 邮箱规范化的写法示例
+server/pipeline/review.py	私有词表	1002720d5361  # 注释里的公开品牌名，无访谈原文
+server/pipeline/review.py	私有词表	420196e6f9c2  # 注释里的公开品牌名，无访谈原文
+server/tests/integration/test_api_e2e.py	密钥	c205362d91ae  # 测试用假令牌
+server/tests/test_api.py	私有词表	a31178207793  # 讲磁盘保护的普通词，撞上词表
+server/tests/test_create_job_integration.py	密钥	14e4fe16efdd  # 测试用假令牌
+server/tests/test_db_guard.py	云端地址	f51c9c1928c0  # 测试里编的数据库地址（账号密码为 u:p 占位）
+server/tests/test_db_guard.py	邮箱	f51c9c1928c0  # 测试里编的数据库地址（账号密码为 u:p 占位）
+src/components/Sidebar.tsx	邮箱	1ee47f9ae669  # 占位邮箱；文件本就随账户功能改掉
+src/lib/appI18n/app.pt.ts	私有词表	1e4fb8795fed  # 葡萄牙语普通词撞上词表
+src/lib/appI18n/app.pt.ts	私有词表	54227bc72974  # 葡萄牙语普通词撞上词表
+src/lib/sampleData.ts	转录形状	01dbbf470931  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	1e31c31c8285  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	1e6c23da5544  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	32b843ad2e81  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	351e6bb982bb  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	3bd99f9264a1  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	3d04951c0edd  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	5ee445c1e92f  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	77b9f027002b  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	8effec5cb092  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	c24ecf944ac4  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	d06f986b74cc  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	dc605c5d31b9  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	ddc63022a50a  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/lib/sampleData.ts	转录形状	ffd66d300366  # 线上自家产品介绍的示例稿，编的，非客户内容
+src/screens/SettingsModal.test.tsx	邮箱	d5e18d1748b2  # 故意写错一个字符的测试邮箱
+src/screens/SettingsModal.tsx	邮箱	1ee47f9ae669  # 占位邮箱；文件本就随账户功能改掉
+src/screens/main/GlossaryAssist.tsx	私有词表	4f8af968593a  # 注释里的公开品牌名，无访谈原文
+src/screens/main/RedactScope.tsx	私有词表	e2b5120d7994  # 公众人物举例

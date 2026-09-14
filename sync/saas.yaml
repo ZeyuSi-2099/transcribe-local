@@ -1,0 +1,193 @@
+# 线上 SaaS 仓（Transcribe.solution）→ 本地开源仓 的文件去留登记。
+#
+# 本地版以线上为底本（Duner 2026-09-14 定）：线上代码整块拿，只换底座。这份登记回答
+# 「线上的每个文件，本地拿不拿、拿了改不改」。tools/saas_scan.py 读它做清点与敏感扫描，
+# 第 6 步的同步巡检也读它。
+#
+#   same    原样同步：本地与线上逐字一致，线上改了直接覆盖
+#   modify  有意不同：拿进来但要改（写清改什么）；同步时人工合并
+#   defer   先拿进来，第 2–4 步再定是 same / modify / 删
+#   skip    不拿（写清为什么）
+#
+# 规则**从上往下、先匹配先生效**，所以具体的写在前面、兜底的写在最后。
+# glob 用 fnmatch：`*` 可以跨目录。线上新增的文件如果一条都匹配不上，saas_scan.py 会列出来。
+#
+# ⛔ 红线：客户音频、金标、逐条人工判定、真实访谈原文，永远不进这个仓库。
+#    带真实内容的文件要么 skip，要么 modify（换成合成内容后才拿）。
+
+rules:
+
+  # ───────────── 不拿：线上仓自己的说明、部署、运维、评测 ─────────────
+  - glob: ["docs/*"]
+    as: skip
+    why: 线上的设计稿、事故记录、交接文档，含内部信息；本地有自己的 docs/
+  - glob: ["CLAUDE.md", "server/README.md", ".gitignore", "server/.gitignore"]
+    as: skip
+    why: 线上仓自己的说明与忽略规则，本地各有一份
+  - glob: [".github/*", "render.yaml", "vercel.json", "docker-compose.yml",
+           "server/Dockerfile", "server/.dockerignore", "server/fly.task.toml",
+           "server/.env.example", "server/add-intl-engine-keys.sh", "server/app/entrypoint_api.sh"]
+    as: skip
+    why: 云端部署（Render / Vercel / Fly / 数据库备份），本机不用
+  - glob: ["server/scripts/*", "server/_local/*"]
+    as: skip
+    why: 定字评测台与云存储运维脚本，含内部路径与评测数据
+  - glob: ["server/transcribe_cli.py"]
+    as: skip
+    why: 线上的命令行入口，本地有自己的 cli
+  - glob: ["scripts/*"]
+    as: skip
+    why: 营销站构建脚本（站点地图、预渲染、分享图、搜索引擎推送）
+  - glob: ["public/sitemap*", "public/robots.txt", "public/og-*", "public/74c4d0e0070a0a2174f7c9ca4197070e.txt"]
+    as: skip
+    why: 营销站的站点地图、分享图、搜索引擎验证文件
+
+  # ───────────── 不拿：云端识别层与定字派单（本地识别层替换） ─────────────
+  - glob: ["server/pipeline/vendor/*"]
+    as: skip
+    why: 云端各家引擎与模糊对齐，本地用 src/transcribe_local 这套
+  - glob: ["server/pipeline/orchestrator.py", "server/pipeline/merge.py", "server/pipeline/skill_merge.py",
+           "server/pipeline/_load.py", "server/pipeline/smoke.py", "server/pipeline/debug_dump.py",
+           "server/pipeline/sync-check.sh"]
+    as: skip
+    why: 云端编排、定字派单、中间产物留档、上游巡检；本地第 3 步写同签名的 transcribe 替换
+  - glob: ["server/tests/test_orchestrator*.py", "server/tests/test_merge.py", "server/tests/test_skill_merge.py",
+           "server/tests/test_p1_status_isolation.py", "server/tests/test_p2_line_parse.py",
+           "server/tests/test_phase2_lang_gate.py", "server/tests/test_phase3_deepseek.py",
+           "server/tests/test_debug_dump.py", "server/tests/test_load.py", "server/tests/test_smoke.py",
+           "server/tests/test_elevenlabs_silent_part.py", "server/tests/test_elv_request_params.py",
+           "server/tests/test_gemini_*.py", "server/tests/test_xunfei_signature.py",
+           "server/tests/test_engine_gate.py"]
+    as: skip
+    why: 测的是上面不拿的云端识别层与编排
+
+  # ───────────── 不拿：账户、计费、增长（Duner 2026-09-14 确认去掉） ─────────────
+  - glob: ["server/app/accounts.py", "server/app/admin_users.py", "server/app/freebies.py",
+           "server/app/growth.py", "server/app/paddle_pay.py", "server/app/payments.py",
+           "server/app/pricing.py", "server/app/projects.py", "server/app/referrals.py",
+           "server/app/signup_source.py", "server/app/stripe_pay.py", "server/app/test_accounts.py",
+           "server/app/data/*"]
+    as: skip
+    why: 邮箱登录、余额与充值、免费额度、推荐、增长漏斗、测试账号、用户管理 —— 本机单用户不需要
+  - glob: ["server/app/fly_machines.py", "server/app/expiries.py"]
+    as: skip
+    why: 云机器派单、证书与域名到期提醒 —— 云端专属
+  - glob: ["server/tests/test_accounts_integration.py", "server/tests/test_admin_users_infra.py",
+           "server/tests/test_billing_integration.py", "server/tests/test_freebies*.py",
+           "server/tests/test_growth*.py", "server/tests/test_login_mail_i18n.py",
+           "server/tests/test_paddle_pay.py", "server/tests/test_pricing*.py", "server/tests/test_projects.py",
+           "server/tests/test_referrals*.py", "server/tests/test_refunds*.py", "server/tests/test_signup_source*.py",
+           "server/tests/test_stripe_pay.py", "server/tests/test_test_accounts_infra.py",
+           "server/tests/test_topup_intents_infra.py", "server/tests/test_throttle.py",
+           "server/tests/test_fly_machines.py", "server/tests/test_account_delete_infra.py"]
+    as: skip
+    why: 测的是上面不拿的账户、计费、增长与云端模块
+
+  # ───────────── 不拿：营销站、法律页、登录、充值界面 ─────────────
+  - glob: ["src/screens/marketing/*", "src/screens/legal/*"]
+    as: skip
+    why: 营销站与条款隐私页，开源仓的 README 承担介绍
+  - glob: ["src/screens/LandingLogin*", "src/screens/LoginCard*", "src/screens/BillingModal*",
+           "src/screens/TopUpModal*", "src/screens/main/HeroPitch*",
+           "src/screens/admin/GrowthTab*", "src/screens/admin/UsersTab*"]
+    as: skip
+    why: 登录屏、充值与账单浮窗、运营驾驶舱的增长与用户两个标签页
+  - glob: ["src/lib/pricing*", "src/lib/ratePeriod*", "src/lib/signupSource*", "src/lib/llmsTxt*",
+           "src/lib/routeMeta*", "src/lib/sitemap.guard*", "src/lib/prerender.guard*",
+           "src/lib/cjkBreaks*", "src/lib/highlight*", "src/lib/profiles*",
+           "src/components/FusionViz*", "src/components/Label*", "src/components/Section*"]
+    as: skip
+    why: 只被营销站、定价、登录用到（按 import 关系逐个核过：从应用入口走不到它们）
+
+  # ───────────── 有意不同：带真实内容，换成合成内容后才拿 ─────────────
+  # real_content: true = 扫描命中登记为「拿进来时必须替换」，不算放行；拿进本仓后的副本必须扫出 0。
+  - glob: ["src/lib/reviewData.ts"]
+    as: modify
+    real_content: true
+    why: 类型原样；SAMPLE_REVIEW / SAMPLE_REVIEW_SEGMENTS 按文件自述改编自一次真实访谈，仍带真实品牌、型号与业绩数字 —— 换成合成示例
+  - glob: ["server/tests/test_transcript.py", "server/tests/test_conflicts.py", "server/tests/test_review.py"]
+    as: modify
+    real_content: true
+    why: 部分用例的输入是真实访谈原句或由它生成的复核报告行（扫描逐行核出） —— 换成合成句，断言不变
+  - glob: ["src/screens/main/Result.test.tsx", "src/AppShell.test.tsx"]
+    as: modify
+    real_content: true
+    why: 断言里引用了 reviewData 的真实示例词 —— 随合成示例一起换
+  - glob: ["src/lib/glossary.test.ts", "src/screens/main/GlossaryAssist.test.tsx", "src/screens/main/OutlineIntake.test.tsx",
+           "server/tests/test_outline_file.py", "server/tests/test_glossary_assist.py"]
+    as: modify
+    real_content: true
+    why: 术语库与大纲用例取自客户项目的术语库与访谈大纲 —— 换成别的领域编的词条
+  - glob: ["server/pipeline/conflicts.py"]
+    as: modify
+    real_content: true
+    why: 模块头注释写了客户录音编号与金标来源 —— 只改注释，逻辑原样
+  - glob: ["src/lib/sampleData.ts"]
+    as: modify
+    why: 类型原样；账单与充值的示例行随计费一起去掉
+
+  # ───────────── 有意不同：换底座 ─────────────
+  - glob: ["server/app/db.py", "server/app/schema.sql"]
+    as: modify
+    why: Postgres → SQLite；专有写法在连接层集中翻译；账户、计费、增长相关的表不建
+  - glob: ["server/app/blobstore.py"]
+    as: modify
+    why: R2 → 本机文件夹，函数名与用法不变
+  - glob: ["server/app/api.py"]
+    as: modify
+    why: 登录固定为本机用户、管理员放行；去掉登录、充值、账单、推荐、用户管理的接口
+  - glob: ["server/app/worker.py", "server/app/jobstore.py"]
+    as: modify
+    why: 单机后台一次一单；去掉结算、退款、云机器派单、讯飞扣减
+  - glob: ["server/app/config.py", "server/app/claude_gate.py", "server/app/account_delete.py"]
+    as: modify
+    why: 云端环境变量换成本地配置；定字名额闸本机恒放行；只留「删除全部转录」，去掉注销账户
+  - glob: ["server/app/health_view.py", "server/app/workflow_view.py", "server/app/alerts.py",
+           "server/app/balances.py", "server/app/p3_config.py", "server/app/p3_probe.py"]
+    as: modify
+    why: 运营驾驶舱改成本机运行面板：资源看本机（模型、磁盘、内存、定字后端连通、DeepSeek 余额）；告警不发邮件
+  - glob: ["server/app/glossary_assist.py"]
+    as: modify
+    real_content: true
+    why: 模型地址写死在代码里 → 走统一的模型后端设置；注释里举了客户术语库的内部代号 → 换成泛称
+  - glob: ["server/pipeline/pp_deepseek.py", "server/pipeline/pp_runner.py", "server/app/postprocess.py"]
+    as: modify
+    why: 模型地址写死在代码里 → 走统一的模型后端设置；后处理去掉按分钟收费
+  - glob: ["server/requirements.txt", "server/conftest.py"]
+    as: modify
+    why: 去掉 psycopg / boto3 / 付款相关依赖；测试夹具改连本机 SQLite 与临时目录
+  - glob: ["src/App.tsx", "src/AppShell.tsx", "src/main.tsx", "src/components/Sidebar.tsx",
+           "src/screens/SettingsModal.tsx", "src/screens/AdminPage.tsx",
+           "src/screens/main/Idle.tsx", "src/screens/main/LangPicker.tsx",
+           "src/lib/api.ts", "src/lib/auth.ts"]
+    as: modify
+    why: 去掉公开页与登录路由、余额与充值；语言不支持的标灰；设置只留「数据」；驾驶舱去掉增长与用户；不上报 Sentry
+  - glob: ["index.html", "package.json", "package-lock.json", "vite.config.ts"]
+    as: modify
+    why: 去掉营销站的元信息与预渲染、Sentry 依赖；构建产物随本地包发布
+
+  # ───────────── 先拿进来，第 2–4 步再定 ─────────────
+  - glob: ["server/tests/integration/*", "server/tests/test_api.py", "server/tests/test_worker.py",
+           "server/tests/test_worker_postprocess.py", "server/tests/test_config.py",
+           "server/tests/test_db_guard.py", "server/tests/test_db_integration.py",
+           "server/tests/test_blobstore_integration.py", "server/tests/test_create_job_integration.py",
+           "server/tests/test_jobstore_integration.py", "server/tests/test_schema_covers_code.py",
+           "server/tests/test_claude_gate*.py", "server/tests/test_p3_*.py",
+           "server/tests/test_health_view_infra.py", "server/tests/test_alerts_infra.py",
+           "server/tests/test_balances.py", "server/tests/test_no_degrade_leak.py",
+           "server/tests/test_rate_limit_retry.py", "server/tests/test_lint.py",
+           "server/tests/test_glossary_db_integration.py", "server/tests/test_postprocess_db_integration.py",
+           "server/tests/test_pp_degraded_integration.py"]
+    as: defer
+    why: 连数据库、存储或云端配置的测试 —— 第 2 步换底座时逐个定：改连本机，或随云端功能删掉
+  - glob: ["src/test/e2e/*"]
+    as: defer
+    why: 端到端走查脚本，第 4 步界面减法时按本地流程改
+
+  # ───────────── 兜底：原样同步 ─────────────
+  - glob: ["server/app/*", "server/pipeline/*", "server/tests/*", "server/pytest.ini"]
+    as: same
+    why: 复核报告解析、导出、术语库、后处理、说话人标签、告警事件等 —— 与本机无关的业务逻辑
+  - glob: ["src/*", "tsconfig.json", "public/favicon*", "public/apple-touch-icon.png"]
+    as: same
+    why: 结果页、复核队列、处理中、历史、术语库、后处理、界面语言与共用组件
