@@ -1,0 +1,102 @@
+# 发版（Duner 2026-09-15 定 g8：构建好的界面不进 git，发布时在这里构建）。
+#
+#   打标签：git tag v<版本号> && git push origin v<版本号>    —— 版本号必须与 pyproject.toml 的 version 一致
+#
+# 流程：构建界面 → 测试 → 打安装包（界面必须在包里）→ 装上安装包真起一次服务 → 挂到 GitHub 发布页。
+# 传 PyPI 默认关着：PyPI 那边给本仓库、本文件、环境 pypi 配好「可信发布」之后，
+# 在仓库 Settings → Secrets and variables → Actions → Variables 里加 PUBLISH_PYPI=true 才会传。
+# 在 Actions 页面手动 Run workflow：只跑到「真起一次服务」为止，不发布，用来演练。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 版本标签与 pyproject.toml 一致
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          [ "${GITHUB_REF_NAME#v}" = "$want" ] || { echo "标签 $GITHUB_REF_NAME 与 pyproject.toml 的 version $want 不一致"; exit 1; }
+
+      - name: 构建界面（含界面测试与类型检查）
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vitest run
+          npm run build
+
+      - name: 根目录测试
+        run: |
+          pip install . pytest
+          PYTHONPATH=src python -m pytest -q tests
+
+      - name: 打安装包（界面不在包里就失败）
+        env:
+          TRANSCRIBE_REQUIRE_UI: "1"
+        run: |
+          pip install build
+          rm -rf dist
+          python -m build --wheel
+
+      - name: 装上安装包，真起一次服务
+        run: |
+          python -m venv /tmp/try
+          /tmp/try/bin/pip install dist/*.whl
+          cd /tmp
+          TRANSCRIBE_DATA=/tmp/try-data /tmp/try/bin/transcribe-local serve --no-open --port 8765 > /tmp/serve.log 2>&1 &
+          curl -sf --retry 60 --retry-connrefused --retry-delay 1 http://127.0.0.1:8765/ | grep -q 'id="root"' \
+            || { cat /tmp/serve.log; exit 1; }
+          curl -sf http://127.0.0.1:8765/api/local/models | grep -q '"ready"' || { cat /tmp/serve.log; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+
+  github-release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - name: 挂到 GitHub 发布页
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  pypi:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') && vars.PUBLISH_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -162,13 +162,22 @@ python3 tools/score.py 你的金标.md out/你的终稿.merged.md --terms 你的
 ## 装
 
 ```bash
-pip install git+https://github.com/ZeyuSi-2099/transcribe-local
+pip install transcribe-local
 transcribe-local setup        # 首启向导：下模型、挑融合后端
 transcribe-local serve        # 起本机服务，自动开浏览器
 ```
 
-还没上 PyPI，先从仓库装。Python ≥ 3.10，**CPU 就够，不需要显卡**。
-发布之前，界面要从源码构建一次（要装 Node）：克隆仓库后 `cd frontend && npm ci && npm run build`。
+安装包里自带构建好的界面，不用装 Node。Python ≥ 3.10，**CPU 就够，不需要显卡**。
+
+还没发布到 PyPI。在那之前从源码跑，要装 Node 把界面构建一次：
+
+```bash
+git clone https://github.com/ZeyuSi-2099/transcribe-local && cd transcribe-local
+(cd frontend && npm ci && npm run build)
+pip install -e .
+transcribe-local setup
+transcribe-local serve
+```
 整条链的第三方依赖只有两个：`sherpa-onnx` 和 `numpy`。
 
 **融合那一步默认接 API**（`deepseek-flash` + `reasoning_effort: high`，一份 38 分钟访谈约十分钟、零点几美元），

@@ -31,13 +31,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/transcribe_local"]
 
+# hatch_build.py：界面构建好了就一并放进包；发版时 CI 设 TRANSCRIBE_REQUIRE_UI=1，界面不在就打包失败
+[tool.hatch.build.targets.wheel.hooks.custom]
+
 # 这四样必须进包，否则 pip 装完找不到：paths.root() 靠 config.default.yaml 当路标向上找项目根，
 # 源码树里它在仓库根、装成 wheel 之后就得在包目录里 —— 两种情形都要能找到。
 [tool.hatch.build.targets.wheel.force-include]
 "config.default.yaml" = "transcribe_local/config.default.yaml"
 "models/manifest.toml" = "transcribe_local/models/manifest.toml"
 # 本机服务的代码：paths.root() 在包里就是 transcribe_local/，serve 从 root()/backend 找它。
-# 构建好的界面 frontend/dist 还没进包（git 里不存构建产物），发布方式待定。
+# 构建好的界面 frontend/dist 不在这里：它不进 git，由 hatch_build.py 在打包时放进 transcribe_local/frontend/dist。
 "backend/app" = "transcribe_local/backend/app"
 "backend/pipeline" = "transcribe_local/backend/pipeline"
 

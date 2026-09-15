@@ -135,7 +135,9 @@ cd frontend && npx tsc --noEmit && npx vitest run && npm run build          # �
 - [x] 热词那条路：**不做**（Duner 2026-09-11 定，热词伤引擎权重）。SeACo 适配器分支与配置项已摘。
 - [x] BSL 的 Licensor 与 Change Date 已填实（Change Date = 2030-10-01）
 - [x] 本机 HTTP 服务 + 浏览器界面 —— 2026-09-15 起换成以线上为底本的 `backend/` + `frontend/`，旧的单文件界面与标准库服务已删
-- [ ] 发布包自带构建好的界面（`frontend/dist` 怎么进包待 Duner 定：提交进 git，还是发布时由 CI 构建）
+- [x] 发布包自带构建好的界面（Duner 2026-09-15 定：构建产物不进 git，发版时由 CI 构建，`hatch_build.py` 放进包）。
+      发版：`git tag v<pyproject 里的 version> && git push origin v<同上>`，流程见 `.github/workflows/release.yml`
+- [ ] 传 PyPI：Duner 在 PyPI 给本仓库配「可信发布」（环境名 `pypi`），再在仓库变量里加 `PUBLISH_PYPI=true`
 - [ ] 英文 profile
 
 ### 远期
