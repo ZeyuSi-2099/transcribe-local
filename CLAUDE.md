@@ -25,6 +25,7 @@
 
 **与线上 SaaS 的关系**（Duner 2026-09-14 定）：本地版以线上 SaaS 为底本做减法 —— 线上代码整块拿，
 只换底座（数据库、文件存放、登录、后台调度、识别）。线上每个文件拿不拿、改不改，登记在 `sync/saas.yaml`。
+线上更新后先跑 `python3 tools/saas_sync_check.py`；本地要改一个登记为「原样同步」的文件，先登记成 `modify` 再改。流程见 `docs/saas-sync.md`。
 
 **拿进来之前必须过 `tools/saas_scan.py`**：
 
@@ -60,8 +61,9 @@ TRANSCRIBE_SCAN_WORDS=<内部仓私有词表> python3 tools/saas_scan.py   # 待
 | 分歧册 | `src/transcribe_local/divergence.py` |
 | 融合（OpenAI 协议） | `src/transcribe_local/fuse.py` |
 | 导出 | `src/transcribe_local/export.py` |
-| 本机服务（标准库） | `src/transcribe_local/server.py` |
-| 界面 | `web/index.html`（单文件，无构建步骤） |
+| 本机服务（以线上后端为底本） | `backend/`（FastAPI + SQLite；转录入口 `backend/pipeline/local_orchestrator.py`） |
+| 界面（以线上界面为底本） | `frontend/`（React + Vite；`serve` 挂的是构建好的 `frontend/dist`） |
+| 线上 → 本地同步 | `sync/saas.yaml` 登记 · `tools/saas_sync_check.py` 巡检 · 流程 `docs/saas-sync.md` |
 | 模型清单与下载 | `src/transcribe_local/models.py` · `models/manifest.toml` |
 | 融合提示词 | `src/transcribe_local/_merge_zh.py`（生成的，在包里，不是单独文件） |
 | 全部参数 | `config.default.yaml` |
@@ -73,13 +75,24 @@ PYTHONPATH=src python3 -m transcribe_local setup              # 首启向导：�
 PYTHONPATH=src python3 -m transcribe_local setup --minimal    # 只装一路（271 M），先出一份稿子
 PYTHONPATH=src python3 -m transcribe_local doctor            # 查依赖与模型
 PYTHONPATH=src python3 -m transcribe_local models pull       # 下模型（下载 2.3 G / 占盘 2.7 G）
-PYTHONPATH=src python3 -m transcribe_local serve             # 起本机服务，界面在浏览器里开
+(cd frontend && npm ci && npm run build)                     # 界面先构建一次（改了 frontend/ 要重新构建）
+PYTHONPATH=src python3 -m transcribe_local serve             # 起本机服务（127.0.0.1:8765），界面在浏览器里开
 PYTHONPATH=src python3 -m transcribe_local run 音频.m4a       # 跑全链（命令行）
 PYTHONPATH=src python3 -m transcribe_local run 音频.m4a --no-fuse   # 只跑到分歧册
 PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 ```
 
 开发时想复用已有的模型缓存：`TRANSCRIBE_LOCAL_MODELS=~/.cache/sherpa-onnx-models`。
+
+改界面时不用每次构建：`serve --no-open` 起接口，另开 `cd frontend && npm run dev`（vite 把 /api 代理到 8765）。
+
+测试：
+
+```bash
+PYTHONPATH=src python3 -m pytest -q tests                                   # 根目录（识别层 + 同步工具）
+cd backend && python3 -m pytest -q -m "not integration" <测试文件>           # 后端（整目录跑有线上带来的待定测试，见 docs/saas-sync.md）
+cd frontend && npx tsc --noEmit && npx vitest run && npm run build          # 界面
+```
 
 ## 改参数之前
 
@@ -121,7 +134,8 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 - [x] 模型许可与 `sha256` 已补齐（默认那七个；来源见 `license_src`）
 - [x] 热词那条路：**不做**（Duner 2026-09-11 定，热词伤引擎权重）。SeACo 适配器分支与配置项已摘。
 - [x] BSL 的 Licensor 与 Change Date 已填实（Change Date = 2030-10-01）
-- [x] 本机 HTTP 服务 + 浏览器界面（`web/`）—— 六屏已通，标准库起服务、无新依赖
+- [x] 本机 HTTP 服务 + 浏览器界面 —— 2026-09-15 起换成以线上为底本的 `backend/` + `frontend/`，旧的单文件界面与标准库服务已删
+- [ ] 发布包自带构建好的界面（`frontend/dist` 怎么进包待 Duner 定：提交进 git，还是发布时由 CI 构建）
 - [ ] 英文 profile
 
 ### 远期

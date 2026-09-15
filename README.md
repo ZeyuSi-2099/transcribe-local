@@ -168,6 +168,7 @@ transcribe-local serve        # 起本机服务，自动开浏览器
 ```
 
 还没上 PyPI，先从仓库装。Python ≥ 3.10，**CPU 就够，不需要显卡**。
+发布之前，界面要从源码构建一次（要装 Node）：克隆仓库后 `cd frontend && npm ci && npm run build`。
 整条链的第三方依赖只有两个：`sherpa-onnx` 和 `numpy`。
 
 **融合那一步默认接 API**（`deepseek-flash` + `reasoning_effort: high`，一份 38 分钟访谈约十分钟、零点几美元），

@@ -47,10 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     p_cfg.add_argument("--init", action="store_true", help="在当前目录写一份 config.yaml 模板")
 
     p_serve = sub.add_parser("serve", help="起本机服务，界面在浏览器里开")
-    p_serve.add_argument("--port", type=int, default=0, help="0 = 自动挑一个空闲端口")
+    p_serve.add_argument("--port", type=int, default=8765,
+                         help="默认 8765。端口固定，界面记住的语言等设置才不会每次启动都丢")
     p_serve.add_argument("--no-open", action="store_true", help="不要自动打开浏览器")
-    p_serve.add_argument("-o", "--out", type=Path, default=Path("out"))
-    p_serve.add_argument("-c", "--config", type=Path, default=Path("config.yaml"))
+    p_serve.add_argument("-c", "--config", type=Path,
+                         help="模型后端等设置存在哪。不给：当前目录有 config.yaml 就用它，否则 ~/.transcribe-local/config.yaml")
 
     sub.add_parser("doctor", help="检查依赖与模型是否就绪")
 
@@ -278,9 +279,48 @@ def _config(a) -> int:
 
 
 def _serve(a) -> int:
-    from . import server
-    return server.serve(_load_cfg(a), a.out, port=a.port, open_browser=not a.no_open,
-                        cfg_path=a.config)
+    """起 backend/（以线上后端为底本的本机服务），构建好的界面挂在同一个端口上。"""
+    import shutil
+    import socket
+    import threading
+    import webbrowser
+
+    from . import paths
+
+    backend, dist = paths.root() / "backend", paths.root() / "frontend" / "dist"
+    if not (backend / "app" / "api.py").is_file():
+        print(f"找不到本机服务的代码（{backend}）。从源码跑的话确认仓库完整。", file=sys.stderr)
+        return 2
+    if not (dist / "index.html").is_file():
+        print(f"界面还没构建（{dist}）。装好 Node 之后跑：cd frontend && npm ci && npm run build", file=sys.stderr)
+        return 2
+    # 和 run、setup 读同一份配置：它们默认用当前目录的 config.yaml，这里也先认它，免得命令行和界面各用各的
+    if a.config:
+        os.environ["TRANSCRIBE_CONFIG"] = str(a.config.resolve())
+    elif not os.environ.get("TRANSCRIBE_CONFIG") and Path("config.yaml").is_file():
+        os.environ["TRANSCRIBE_CONFIG"] = str(Path("config.yaml").resolve())
+    with socket.socket() as s:
+        if s.connect_ex(("127.0.0.1", a.port)) == 0:
+            print(f"端口 {a.port} 已被占用（也许已经开着一个）。换一个：transcribe-local serve --port {a.port + 1}",
+                  file=sys.stderr)
+            return 2
+
+    sys.path.insert(0, str(backend))
+    import uvicorn
+    from app import api, local_web
+    from pipeline.local_orchestrator import config_path
+
+    local_web.mount(api.app, dist)
+    url = f"http://127.0.0.1:{a.port}"
+    print(f"界面开在 {url}")
+    print(f"设置：{config_path()}\n转录与结果：{api.config.DATA_DIR}")
+    print("识别在本机跑，音频不出这台电脑。按 Ctrl-C 停。")
+    if not shutil.which("ffmpeg"):
+        print("⚠️ 没装 ffmpeg —— 界面上传录音会失败（读不出时长）。macOS：brew install ffmpeg")
+    if not a.no_open:
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run(api.app, host="127.0.0.1", port=a.port, log_level="warning")   # ⛔ 只听本机，不对局域网开放
+    return 0
 
 
 def _doctor(a) -> int:

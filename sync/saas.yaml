@@ -1,8 +1,10 @@
 # 线上 SaaS 仓（Transcribe.solution）→ 本地开源仓 的文件去留登记。
 #
 # 本地版以线上为底本（Duner 2026-09-14 定）：线上代码整块拿，只换底座。这份登记回答
-# 「线上的每个文件，本地拿不拿、拿了改不改」。tools/saas_scan.py 读它做清点与敏感扫描，
-# 第 6 步的同步巡检也读它。
+# 「线上的每个文件，本地拿不拿、拿了改不改」。三个工具都读它：
+#   tools/saas_scan.py        清点 + 敏感扫描
+#   tools/saas_pull.py        按登记把线上文件搬进来（先过扫描）
+#   tools/saas_sync_check.py  同步巡检：线上改了什么、本地跟没跟上（流程见 docs/saas-sync.md）
 #
 #   same    原样同步：本地与线上逐字一致，线上改了直接覆盖
 #   modify  有意不同：拿进来但要改（写清改什么）；同步时人工合并
@@ -12,8 +14,13 @@
 # 规则**从上往下、先匹配先生效**，所以具体的写在前面、兜底的写在最后。
 # glob 用 fnmatch：`*` 可以跨目录。线上新增的文件如果一条都匹配不上，saas_scan.py 会列出来。
 #
-# ⛔ 红线：客户音频、金标、逐条人工判定、真实访谈原文，永远不进这个仓库。
-#    带真实内容的文件要么 skip，要么 modify（换成合成内容后才拿）。
+# ⛔ 红线：客户音频、金标、逐条人工判定，永远不进这个仓库。
+#    线上已有的真实内容（访谈原话、客户项目术语与大纲、注释里的录音编号），Duner 2026-09-15 看过逐项清单后
+#    定原样拿进来（计划页 g5），扫描命中逐行登记在 saas_scan_allow.txt。线上以后新加的内容照样逐行看。
+
+# 基线：上次跟上线上时，线上仓的提交。巡检拿线上现在的内容和它比，分出「线上改过」还是「本地改过」。
+# 跟上之后用 `python3 tools/saas_sync_check.py --mark-synced` 挪，不手改。
+base: 0c9d0da81110
 
 rules:
 
@@ -218,6 +225,13 @@ rules:
   - glob: ["src/test/e2e/*"]
     as: defer
     why: 端到端走查脚本，第 4 步界面减法时按本地流程改
+
+  # ───────────── 先拿进来：测的是本地没搬、或第 5 步改掉的线上行为 ─────────────
+  - glob: ["server/tests/test_pp_runner.py", "server/tests/test_pp_lang.py", "server/tests/test_ds_pricing.py",
+           "server/tests/test_postprocess.py", "server/tests/test_postprocess_api.py", "server/tests/test_workflow_view.py"]
+    as: defer
+    why: 与线上逐字一致，但在本机跑不通——测后处理结账（accounts / pricing）、读 vendor 目录下的提示词与定字脚本、
+         导入证书到期模块（expiries），这些本地都没搬；待逐条改成本机行为（届时登记 modify）或删掉
 
   # ───────────── 兜底：原样同步 ─────────────
   - glob: ["server/app/*", "server/pipeline/*", "server/tests/*", "server/pytest.ini"]
