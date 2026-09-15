@@ -1,26 +1,18 @@
-"""免费桩端到端：登录态上传（真 WAV、走 ffprobe+预扣）→ 排队 → 本进程 worker(桩 transcribe)
+"""免费桩端到端：上传（真 WAV、走 ffprobe）→ 排队 → 本进程 worker(桩 transcribe)
 → 存结果 → API 取结果。不调云、不花钱。
 
-环境要求：compose 起 postgres+minio+**api**（api 须是当前代码镜像，改了 server/ 记得先
-`docker compose up -d --build api`），且 **worker 容器要停**（否则容器 worker 会抢先领取
-本测试的 job 去跑真实管线 = 真调 ASR 花钱）：
-    docker compose up -d --build api && docker compose stop worker
-本测试直接驱动一次 worker.process_one()（桩），需本地 env（DATABASE_URL/S3_* 指向本地）。
-登录/余额不走邮件（本地 api 可能配了真实 RESEND）：直接 DB 造会话与余额。
+本机版（与线上不同）：线上要 docker 起 postgres+minio+api、用 requests 打 localhost:8000，并直接往库里
+造登录会话与余额；本机没有登录与余额，接口用 TestClient 在本进程里调，库与存储是 conftest 给的临时库和临时文件夹。
 """
 import io
 import struct
 import wave
 
 import pytest
-import requests
+from fastapi.testclient import TestClient
 
-from app import db, jobstore, worker
+from app import api, db, jobstore, worker
 from pipeline.transcript import Segment
-
-API = "http://localhost:8000"
-EMAIL = "e2e@test.local"
-TOKEN = "e2e-test-token"
 
 
 def _tiny_wav_bytes(seconds: float = 0.5, rate: int = 8000) -> bytes:
@@ -34,19 +26,9 @@ def _tiny_wav_bytes(seconds: float = 0.5, rate: int = 8000) -> bytes:
     return buf.getvalue()
 
 
-def _seed_session_and_balance() -> None:
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO users (email, balance_cents) VALUES (%s, 100000) "
-            "ON CONFLICT (email) DO UPDATE SET balance_cents = 100000", (EMAIL,))
-        conn.execute(
-            "INSERT INTO sessions (token, email, expires_at) VALUES (%s, %s, now() + interval '1 hour') "
-            "ON CONFLICT (token) DO UPDATE SET expires_at = now() + interval '1 hour'", (TOKEN, EMAIL))
-
-
 @pytest.mark.infra
 def test_full_http_flow_with_stub_pipeline(monkeypatch):
-    _seed_session_and_balance()
+    client = TestClient(api.app)
     # 桩**收下任何参数**（`*_, **__`），不照抄真函数的签名。
     # ⚠️ 这不是偷懒，是这条测试长红 19 天的直接原因：原来的桩把当时的形参逐个写死，
     # 之后真函数加了 `on_report`（复核卡按时间码锚定那轮）与 `ui_lang`，桩不认，
@@ -58,12 +40,10 @@ def test_full_http_flow_with_stub_pipeline(monkeypatch):
         worker, "transcribe",
         lambda *_, **__: ([Segment(t="00:00:01", s="你好", sp="主持人")], []),
     )
-    headers = {"Authorization": f"Bearer {TOKEN}"}
-    r = requests.post(
-        f"{API}/api/jobs",
+    r = client.post(
+        "/api/jobs",
         files={"file": ("a.wav", io.BytesIO(_tiny_wav_bytes()), "audio/wav")},
         data={"lang": "zh"},
-        headers=headers,
     )
     assert r.status_code == 200, r.text
     jid = r.json()["jobId"]
@@ -71,8 +51,6 @@ def test_full_http_flow_with_stub_pipeline(monkeypatch):
     # ⚠️ 这不是洁癖：本地库里只要还剩一条别的 queued（上一次跑失败留下的、或手写脚本造的），
     # `process_one()` 就会去跑那一条并照样返回 True，而本测试的断言全部落空——
     # 补上「这一单真的跑成了」那条断言时，当场就撞见了这个情况。
-    # 也不用 `run_one_job()`：它会注入全局的 Claude / 引擎闸，那些是模块级状态，
-    # 会漏进同一进程里后面跑的测试。
     job = jobstore.claim_specific(jid)
     assert job is not None, "刚建的单没能领到——它不在 queued？"
     worker._process_job(job)
@@ -87,7 +65,7 @@ def test_full_http_flow_with_stub_pipeline(monkeypatch):
             "SELECT status, error FROM jobs WHERE id = %s", (jid,)).fetchone()
     assert st == "done", f"任务没跑成（status={st}），worker 里存下的异常：\n{err}"
 
-    res = requests.get(f"{API}/api/jobs/{jid}/result", headers=headers)
+    res = client.get(f"/api/jobs/{jid}/result")
     assert res.status_code == 200
     # 先断言取回来有东西：直接下标取的话，空稿会报一个 IndexError，
     # 那又是「指向症状不指向原因」。真实路径上空稿由 orchestrator 抛异常拦住

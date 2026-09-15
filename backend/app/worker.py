@@ -29,6 +29,15 @@ ISOLATE = os.environ.get("TRANSCRIBE_ISOLATE_JOBS", "1") != "0"
 CANCEL_POLL_SEC = 0.5
 
 
+def transcribe(*args, **kwargs):
+    """转录入口。与线上 `worker.transcribe` 同名同签名（线上是模块级导入的名字，测试按这个名字打桩）。
+
+    本机版用到时才导入识别层：它会拉起识别引擎，接口进程平时用不到。
+    换入口用 TRANSCRIBE_ORCHESTRATOR：取消任务的测试在子进程里跑，打桩传不过去，只能靠它换成假的。"""
+    orchestrator = importlib.import_module(os.environ.get("TRANSCRIBE_ORCHESTRATOR", "pipeline.local_orchestrator"))
+    return orchestrator.transcribe(*args, **kwargs)
+
+
 def _transcode_to_m4a(flac_path: str, out_path: str) -> None:
     """FLAC → AAC(.m4a) 回放音频：16kHz 单声道 32kbps，体积约 FLAC 的 1/5，且全浏览器可播
     （Safari/iPhone 也行，Opus 在 Safari 有坑故不用）。
@@ -105,10 +114,6 @@ def _process_job(job, workdir: str | None = None) -> None:
     input_path = os.path.join(workdir, f"input{suffix}")
     audio_key = None
     try:
-        # 换转录入口用 TRANSCRIBE_ORCHESTRATOR（测试里换成一个假的，验证取消）
-        transcribe = importlib.import_module(
-            os.environ.get("TRANSCRIBE_ORCHESTRATOR", "pipeline.local_orchestrator")).transcribe
-
         blobstore.download_to(job.audio_key, input_path)
         t0 = time.time()
         last_metrics: dict = {}

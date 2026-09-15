@@ -10,12 +10,15 @@ from fastapi.testclient import TestClient
 
 import app.api as api
 import app.glossary as glossary_mod
-from app import pricing
-from app import accounts as accounts_mod
 from app import config
 from app.blobstore import NoSuchKey
 from app.jobstore import Job
 
+# 本机版（与线上不同）：账户与计费模块不搬（登录、充值、结算、退款都没有）。只有登记为「不适用」的用例
+# （conftest.py 的 NOT_APPLICABLE）会碰到它们；这里放同名占位，免得整份文件一导入就失败、连本机在用的用例也跑不了。
+pricing = None
+accounts_mod = types.SimpleNamespace(RateLimited=type("RateLimited", (Exception,), {}),
+                                     RefundNotAllowed=type("RefundNotAllowed", (Exception,), {}))
 
 class FakeJobStore:
     def __init__(self):
@@ -298,7 +301,16 @@ def _client(monkeypatch):
     fake_acc.jobstore = fake_js   # reserve_and_create_job 经它建 job，测试仍断言 js.jobs
     monkeypatch.setattr(api, "jobstore", fake_js)
     monkeypatch.setattr(api, "blobstore", fake_blob)
-    monkeypatch.setattr(api, "accounts", fake_acc)
+    monkeypatch.setattr(api, "accounts", fake_acc, raising=False)   # 本机版 api 没有 accounts，只给不适用的用例留着
+    # 本机版（与线上不同）：单用户不登录——当前用户固定是 local.EMAIL，这里对齐成测试里预登录的 a@b.com；
+    # 建单与列单走 local（线上走 accounts.reserve_and_create_job / list_jobs），接到同一个 FakeJobStore。
+    monkeypatch.setattr(api.local, "EMAIL", "a@b.com")
+    monkeypatch.setattr(api.local, "create_job",
+                        lambda audio_key, lang, recording_type, *, file_name=None, duration_sec=None,
+                        glossary_id=None, audio_sha256=None, ui_lang=None:
+                        fake_js.create_job(audio_key, lang, recording_type, "a@b.com", file_name=file_name,
+                                           duration_sec=duration_sec, glossary_id=glossary_id))
+    monkeypatch.setattr(api.local, "list_jobs", fake_acc.list_jobs)
     monkeypatch.setattr(api, "glossary", FakeGlossary())
     monkeypatch.setattr(api, "balances", FakeBalances())
     monkeypatch.setattr(api, "postprocess", FakePostprocessStub())

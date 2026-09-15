@@ -12,8 +12,7 @@ from fastapi.testclient import TestClient
 
 import app.api as api
 import app.postprocess as pp_mod
-from app import pricing
-from test_api import AUTH, FakeAccounts, FakeBlob, FakeGlossary, FakeJobStore
+from test_api import AUTH, FakeAccounts, FakeBlob, FakeGlossary, FakeJobStore, pricing  # 本机版：pricing 是占位（计费不搬）
 
 
 class FakePostprocess:
@@ -111,7 +110,8 @@ def _client(monkeypatch):
     fake_acc.jobstore = fake_js
     monkeypatch.setattr(api, "jobstore", fake_js)
     monkeypatch.setattr(api, "blobstore", fake_blob)
-    monkeypatch.setattr(api, "accounts", fake_acc)
+    monkeypatch.setattr(api, "accounts", fake_acc, raising=False)   # 本机版 api 没有 accounts，只给不适用的用例留着
+    monkeypatch.setattr(api.local, "EMAIL", "a@b.com")               # 本机版：当前用户固定是 local.EMAIL
     monkeypatch.setattr(api, "glossary", FakeGlossary())
     monkeypatch.setattr(api, "postprocess", fake_pp)
     return TestClient(api.app), fake_js, fake_blob, fake_pp
@@ -349,7 +349,7 @@ def test_get_postprocess_contract_shape(monkeypatch):
     body = client.get(f"/api/jobs/{jid}/postprocess", headers=AUTH).json()
     assert body["status"] == "running" and body["stepIndex"] == 2 and body["totalSteps"] == 2
     assert body["currentStep"] == "redact" and body["listName"] == "清单A"
-    assert body["steps"] == ["narrate", "redact"] and body["priceCents"] == api.pricing.postprocess_price_cents(["narrate", "redact"], 600)
+    assert body["steps"] == ["narrate", "redact"]   # 本机版（与线上不同）：不收费，不核对 priceCents
     # 完成态：products 带 kind+中文名
     fake_pp.jobs[jid].update(status="done", products=["narrate", "redact"],
                              qc_fix_count=4, has_qc=True)
@@ -456,8 +456,8 @@ def test_jobs_list_carries_postprocess_summary(monkeypatch):
     jid = _done_job(js)
     _start(client, jid, {"steps": ["narrate", "redact"]})
     fake_pp.jobs[jid].update(status="running", current_step="redact", step_index=2)
-    # FakeAccounts.list_jobs 返回固定行；换成带本 job 的行以验证合并逻辑
-    api.accounts.list_jobs = lambda email: [{"id": jid, "status": "done"}, {"id": "no-pp", "status": "done"}]
+    # 换成带本 job 的行以验证合并逻辑（本机版：列单走 local.list_jobs，线上走 accounts.list_jobs）
+    monkeypatch.setattr(api.local, "list_jobs", lambda email: [{"id": jid, "status": "done"}, {"id": "no-pp", "status": "done"}])
     rows = client.get("/api/jobs", headers=AUTH).json()["jobs"]
     assert rows[0]["postprocess"] == {"status": "running", "stepIndex": 2, "totalSteps": 2,
                                       "currentStep": "redact", "qcFixCount": 0, "products": []}

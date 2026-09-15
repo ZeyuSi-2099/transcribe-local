@@ -13,13 +13,11 @@ from pathlib import Path
 
 from app import speaker_labels
 from pipeline import pp_deepseek, pp_lang, pp_redact_ds, pp_runner
+from pipeline._pp_prompts import PP_NARRATE, PP_REDACT, SHARED_QC
 
-SKILLS = Path(__file__).resolve().parents[1] / "pipeline" / "vendor" / ".claude" / "skills"
-FILES = [
-    SKILLS / "pp-narrate" / "SKILL.md",
-    SKILLS / "pp-redact" / "SKILL.md",
-    SKILLS / "_shared" / "共性质检.md",
-]
+# 本机版（与线上不同）：线上读 vendor 下三份 .md；本机不搬 vendor，读的是从同样三份生成进代码的提示词
+# （tools/saas_pp_prompts.py，--check 保证与线上逐字一致）
+FILES = {"pp-narrate": PP_NARRATE, "pp-redact": PP_REDACT, "共性质检": SHARED_QC}
 
 # 会毁稿的那一类指令：命令模型把非中文的东西改成中文。
 # ⚠️ 判据是**祈使句**（「必须/应/→ 替换为…中文」），不是「出现了『中文』两个字」——
@@ -35,15 +33,14 @@ _DESTRUCTIVE = [
 def test_三份脚本里没有把非中文字符改成中文的指令():
     """一份西语稿进「视角转换」，照那条执行每个 á é í ó ú ñ 都该被换成中文；
     俄语稿整篇都是「其他语言字符」。而它**不报错**——界面上显示加工成功。"""
-    for f in FILES:
-        text = f.read_text(encoding="utf-8")
+    for name, text in FILES.items():
         for pat in _DESTRUCTIVE:
-            assert not pat.search(text), f"{f.name} 里还有会毁稿的字符替换指令：{pat.pattern}"
+            assert not pat.search(text), f"{name} 里还有会毁稿的字符替换指令：{pat.pattern}"
 
 
 def test_中文专属检查被标成仅中文稿():
     """繁简统一、中文连字符这类检查本身没错，错在无条件执行。标出适用范围即可。"""
-    shared = (SKILLS / "_shared" / "共性质检.md").read_text(encoding="utf-8")
+    shared = SHARED_QC
     assert "【仅中文稿】" in shared, "共性质检里没有标出哪些条目只对中文稿生效"
     assert shared.count("【仅中文稿】") >= 2, "至少繁简统一与中文连字符两条要标"
 

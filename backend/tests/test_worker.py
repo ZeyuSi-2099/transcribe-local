@@ -51,8 +51,7 @@ def test_pool_concurrency_fuse_forces_single_worker_in_process_mode(monkeypatch)
             for i in range(2)]
     lock = _th.Lock()
     done = []
-    monkeypatch.setattr(worker.config, "MAX_CONCURRENT_JOBS", 2)
-    monkeypatch.setattr(worker.config, "FLY_DISPATCH", False)
+    # 本机版（与线上不同）：没有 MAX_CONCURRENT_JOBS / FLY_DISPATCH 这两个旋钮，恒为 1 个工作线程
 
     def claim():
         with lock:
@@ -148,7 +147,6 @@ def test_watchdog_requeues_stale_periodically(monkeypatch):
     monkeypatch.setattr(worker.config, "WATCHDOG_INTERVAL_SEC", 0.05)
     monkeypatch.setattr(worker, "check_alerts", lambda: None)   # 本测试只验周期回收，隔离告警的真实 DB 调用
     monkeypatch.setattr(worker, "refresh_balances", lambda: None)   # 同上：隔离余额刷新的真实外部调用
-    monkeypatch.setattr(worker.accounts, "sweep_unrefunded_failures", lambda: 0)   # 同上：隔离返还清扫的真实 DB 调用
     monkeypatch.setattr(worker.jobstore, "fail_stale_queued", lambda *a, **k: 0)    # 同上
     monkeypatch.setattr(worker.jobstore, "requeue_stale_running", count_requeue)
     monkeypatch.setattr(worker.jobstore, "claim_next_queued", lambda: None)
@@ -171,12 +169,11 @@ def test_watchdog_releases_stale_queued_periodically(monkeypatch):
     monkeypatch.setattr(worker.config, "WATCHDOG_INTERVAL_SEC", 0.05)
     monkeypatch.setattr(worker, "check_alerts", lambda: None)
     monkeypatch.setattr(worker, "refresh_balances", lambda: None)
-    monkeypatch.setattr(worker.accounts, "sweep_unrefunded_failures", lambda: 0)
     monkeypatch.setattr(worker.jobstore, "requeue_stale_running", lambda *a, **k: 0)
     monkeypatch.setattr(worker.jobstore, "fail_stale_queued",
                         lambda hours: calls.update(n=calls["n"] + 1, hours=hours) or 0)
     monkeypatch.setattr(worker.jobstore, "claim_next_queued", lambda: None)
-    threads, stop = worker.start_in_thread(with_workers=False)
+    threads, stop = worker.start_in_thread()   # 本机版没有「只起看门狗」的模式；工作线程领不到单，空转
     for _ in range(750):        # 上限 15s：正常 0.2s 内就 break，放宽只影响真失败时的等待
         if calls["n"] >= 1:
             break
@@ -342,8 +339,6 @@ def test_process_one_marks_failed_on_exception(monkeypatch):
                         lambda jid, err, public=None: fail.update(v=(jid, err, public)) or True)
     monkeypatch.setattr(worker.jobstore, "set_done",
                         lambda *a: (_ for _ in ()).throw(AssertionError("不应 done")))
-    monkeypatch.setattr(worker.accounts, "refund_job_reservation",
-                        lambda jid: refunded.update(jid=jid) or 100)
 
     def boom(audio_path, on_phase=None, on_flac=None, glossary_text="", lang="zh", on_report=None, ui_lang=None):
         raise RuntimeError("pipeline 炸了")
@@ -352,9 +347,10 @@ def test_process_one_marks_failed_on_exception(monkeypatch):
     assert worker.process_one() is True
     assert fail["v"][0] == "j2" and "pipeline 炸了" in fail["v"][1]
     # E2 脱敏：内部 traceback（含 "pipeline 炸了"）不得混进用户话术
-    assert fail["v"][2] and "pipeline 炸了" not in fail["v"][2]
-    # 失败：按 job 返还预扣（原语自身按标记幂等，钱的守卫在库层）
-    assert refunded == {"jid": "j2"}
+    # 本机版：不传话术时由 jobstore 落默认话术；本机不收费，没有返还
+    public = fail["v"][2] or worker.jobstore._DEFAULT_ERROR_PUBLIC
+    assert public and "pipeline 炸了" not in public
+    assert refunded == {}
 
 
 def test_process_one_no_refund_when_set_failed_loses_race(monkeypatch):
@@ -450,8 +446,7 @@ def test_process_one_no_settle_when_set_done_loses_race(monkeypatch):
     monkeypatch.setattr(worker.blobstore, "delete", lambda key: called.append("delete"))
     monkeypatch.setattr(worker, "_transcode_to_m4a", lambda flac, out: None)
     monkeypatch.setattr(worker.glossary, "get_glossary_content", lambda gid: "")
-    monkeypatch.setattr(worker.accounts, "settle_job", lambda *a, **k: called.append("settle_job"))
-    monkeypatch.setattr(worker.balances, "consume", lambda *a, **k: called.append("consume"))
+    # 本机版：没有结算与讯飞扣减；set_done 输掉的对手是「用户点了取消」
 
     def fake_transcribe(audio_path, on_phase=None, on_flac=None, glossary_text="", lang="zh", on_report=None, ui_lang=None):
         if on_flac:
@@ -511,27 +506,24 @@ def test_process_one_no_duration_anywhere_refunds_reservation(monkeypatch):
     assert refunded == ["j4b"]
 
 
-def test_process_one_settles_even_if_set_audio_key_raises(monkeypatch):
-    # 赢家杂务（切回放指针/删原文件）任何一步抛异常都不该吞掉结算：
-    # 旧序 set_audio_key 无保护地跑在结算前，DB 瞬断 → 跳过结算且 set_failed 对 done 是
-    # no-op → 不结算也不退，预扣款冻死无痕。新序：结算第一时间办完，杂务各自兜异常。
+def test_process_one_stays_done_even_if_set_audio_key_raises(monkeypatch):
+    # 赢家杂务（切回放指针/删原文件）任何一步抛异常都不该把已 done 的单拖进失败分支。
+    # 本机版（与线上不同）：线上这条守的是「杂务抛错不许吞掉结算」，本机不收费，守剩下的那半。
     job = Job(id="j4c", status="running", phase=None, progress=0, lang="zh",
               audio_key="audio/j4c.mp4", result_key=None, error=None, user_email="a@b.com",
               file_name="访谈.mp4", reserved_cents=120)
-    settled, refunded = [], []
+    failed = []
     monkeypatch.setattr(worker.jobstore, "claim_next_queued", lambda: job)
     monkeypatch.setattr(worker.jobstore, "update_progress", lambda *a, **k: None)
     monkeypatch.setattr(worker.jobstore, "set_done", lambda *a, **k: True)
     monkeypatch.setattr(worker.jobstore, "set_audio_key", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db 瞬断")))
-    monkeypatch.setattr(worker.jobstore, "set_failed", lambda *a, **k: False)
+    monkeypatch.setattr(worker.jobstore, "set_failed", lambda *a, **k: failed.append(a) or False)
     monkeypatch.setattr(worker.blobstore, "download_to", lambda key, path: open(path, "wb").write(b"A"))
     monkeypatch.setattr(worker.blobstore, "put_bytes", lambda *a, **k: None)
     monkeypatch.setattr(worker.blobstore, "put_file", lambda key, path: None)
     monkeypatch.setattr(worker.blobstore, "delete", lambda key: None)
     monkeypatch.setattr(worker, "_transcode_to_m4a", lambda flac, out: None)
     monkeypatch.setattr(worker.glossary, "get_glossary_content", lambda gid: "")
-    monkeypatch.setattr(worker.accounts, "settle_job", lambda *a, **k: settled.append(a))
-    monkeypatch.setattr(worker.accounts, "refund_job_reservation", lambda *a, **k: refunded.append(a))
 
     def fake_transcribe(audio_path, on_phase=None, on_flac=None, glossary_text="", lang="zh", on_report=None, ui_lang=None):
         if on_flac:
@@ -541,8 +533,7 @@ def test_process_one_settles_even_if_set_audio_key_raises(monkeypatch):
 
     monkeypatch.setattr(worker, "transcribe", fake_transcribe)
     assert worker.process_one() is True
-    assert len(settled) == 1        # 结算照常发生（先于杂务）
-    assert refunded == []           # 成功单不该走退款
+    assert failed == []             # 杂务抛错没有把成功单判成失败
 
 
 def test_process_one_stores_m4a_and_deletes_raw(monkeypatch):
@@ -639,7 +630,6 @@ def test_process_one_injects_user_glossary(monkeypatch):
     monkeypatch.setattr(worker.jobstore, "set_done", lambda *a, **k: True)
     monkeypatch.setattr(worker.blobstore, "download_to", lambda key, path: open(path, "wb").write(b"A"))
     monkeypatch.setattr(worker.blobstore, "put_bytes", lambda *a, **k: None)
-    monkeypatch.setattr(worker.accounts, "settle_job", lambda *a, **k: None)
     monkeypatch.setattr(worker.glossary, "get_glossary_content",
                         lambda gid: "FD ｜ 履约分销" if gid == "gl-1" else "")
 
@@ -775,8 +765,7 @@ def test_watchdog_refreshes_balances_periodically(monkeypatch):
     monkeypatch.setattr(worker.config, "WATCHDOG_INTERVAL_SEC", 0.05)
     monkeypatch.setattr(worker.config, "BALANCE_REFRESH_MIN", 0)
     monkeypatch.setattr(worker, "check_alerts", lambda: None)
-    monkeypatch.setattr(worker.accounts, "sweep_unrefunded_failures", lambda: 0)   # 隔离真实 DB
-    monkeypatch.setattr(worker.jobstore, "fail_stale_queued", lambda *a, **k: 0)    # 同上
+    monkeypatch.setattr(worker.jobstore, "fail_stale_queued", lambda *a, **k: 0)    # 隔离真实 DB
     monkeypatch.setattr(worker.jobstore, "requeue_stale_running", lambda *a, **k: 0)
     monkeypatch.setattr(worker.jobstore, "claim_next_queued", lambda: None)
     cnt = {"n": 0}

@@ -2,6 +2,9 @@
 
 真打本地 Postgres + MinIO + 真 ffprobe（不 mock）。只碰本文件专属测试 email/token 的
 users/jobs/ledger/sessions 行，自足清理，不做全表清空，不影响其他数据。
+
+本机版（与线上不同）：库与存储是 conftest 给的临时库和临时文件夹；没有登录、余额与预扣——
+测时长、存音频、时长上限这几条改成不带登录照跑，费率与余额那三条登记为不适用（conftest.py）。
 """
 import io
 import math
@@ -10,7 +13,9 @@ import subprocess
 import pytest
 from fastapi.testclient import TestClient
 
-from app import api, blobstore, config, db, pricing
+from app import api, blobstore, config, db
+
+pricing = None   # 本机版：计费模块不搬；只有登记为不适用的用例用到它
 
 EMAIL = "create-job-test@example.com"
 TOKEN = "test-token-create-job-integration"
@@ -28,11 +33,9 @@ def _tiny_wav_bytes(duration_sec: float = 2.0) -> bytes:
 
 
 def _wipe():
+    # 本机版：每个测试本来就是一个全新的临时库，这里只清 jobs（没有 ledger / sessions / users 表）
     with db.connect() as conn:
         conn.execute("DELETE FROM jobs WHERE user_email = %s", (EMAIL,))
-        conn.execute("DELETE FROM ledger WHERE email = %s", (EMAIL,))
-        conn.execute("DELETE FROM sessions WHERE token = %s", (TOKEN,))
-        conn.execute("DELETE FROM users WHERE email = %s", (EMAIL,))
 
 
 @pytest.fixture(autouse=True)
@@ -54,29 +57,24 @@ def _login(balance_cents: int) -> None:
 
 
 @pytest.mark.infra
-def test_create_job_sufficient_balance_reserves_and_creates():
-    _login(10000)
+def test_create_job_probes_duration_and_stores_audio():
+    # 本机版：线上这条叫「余额够 → 预扣并建单」；本机不收费，守剩下的「服务端实测时长落库 + 音频真存下」
     client = TestClient(api.app)
     r = client.post(
         "/api/jobs",
         files={"file": ("tiny.wav", io.BytesIO(_tiny_wav_bytes(2.0)), "audio/wav")},
         data={"lang": "zh"},
-        headers=AUTH,
     )
     assert r.status_code == 200
     jid = r.json()["jobId"]
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT duration_sec, reserved_cents, audio_key FROM jobs WHERE id = %s", (jid,)
+            "SELECT duration_sec, audio_key FROM jobs WHERE id = %s", (jid,)
         ).fetchone()
     assert row is not None
-    duration_sec, reserved_cents, audio_key = row
+    duration_sec, audio_key = row
     assert 1 <= duration_sec <= 3          # 服务端 ffprobe 实测 ~2s 落库，不是编造值
-    assert reserved_cents >= 1             # ceil(2s/60 * 150) = 5 分
-    with db.connect() as conn:
-        bal = conn.execute("SELECT balance_cents FROM users WHERE email=%s", (EMAIL,)).fetchone()[0]
-    assert bal == 10000 - reserved_cents   # 余额按预扣额精确扣减
-    assert blobstore.get_bytes(audio_key)  # 真上传到 R2/MinIO，不抛 NoSuchKey
+    assert blobstore.get_bytes(audio_key)  # 真存进本机文件夹，不抛 NoSuchKey
     blobstore.delete(audio_key)
 
 
@@ -150,18 +148,14 @@ def test_create_job_insufficient_balance_402_no_job_balance_untouched():
 
 @pytest.mark.infra
 def test_create_job_server_probed_duration_over_max_is_413(monkeypatch):
-    _login(10000)
     monkeypatch.setattr(config, "MAX_DURATION_SEC", 1)   # 把上限压到 1 秒，逼近超限分支
     client = TestClient(api.app)
     r = client.post(
         "/api/jobs",
         files={"file": ("tiny.wav", io.BytesIO(_tiny_wav_bytes(2.0)), "audio/wav")},   # 真实 2s > 压低后的 1s
         data={"lang": "zh", "duration_sec": "1"},   # 前端即使谎报很短也不影响服务端实测判定
-        headers=AUTH,
     )
     assert r.status_code == 413
     with db.connect() as conn:
-        n = conn.execute("SELECT count(*) FROM jobs WHERE user_email=%s", (EMAIL,)).fetchone()[0]
-        bal = conn.execute("SELECT balance_cents FROM users WHERE email=%s", (EMAIL,)).fetchone()[0]
-    assert n == 0
-    assert bal == 10000     # 超限判定在 reserve 之前，余额分文未动
+        n = conn.execute("SELECT count(*) FROM jobs").fetchone()[0]
+    assert n == 0           # 本机版：没有余额可查，只守「没建单」

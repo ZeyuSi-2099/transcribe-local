@@ -205,33 +205,35 @@ rules:
     as: modify
     why: 去掉测预扣返还与后处理结账的用例（本机不收费）；其余用例原样，改连本机 SQLite 跑
 
-  # ───────────── 先拿进来，第 2–4 步再定 ─────────────
-  - glob: ["server/tests/test_merge.py", "server/tests/test_skill_merge.py", "server/tests/test_debug_dump.py"]
+  # ───────────── 线上测试：本机改过才跑得通的 ─────────────
+  # 规则（Duner 2026-09-15 确认）：本地用得上的改到通过；本地根本没有那个功能的用例，登记在
+  # backend/conftest.py 的 NOT_APPLICABLE（写明理由，跑的时候跳过），文件本身照常同步——没改过的仍是 same。
+  - glob: ["server/tests/test_worker.py", "server/tests/test_worker_postprocess.py", "server/tests/test_pp_runner.py"]
+    as: modify
+    why: 结算、返还、云机器入口、备份检查、Claude 撞顶排队登记为不适用；其余用例去掉对账户与派单旋钮的打桩，后处理改用「假模型后端」
+  - glob: ["server/tests/test_api.py", "server/tests/test_postprocess_api.py", "server/tests/test_postprocess.py"]
+    as: modify
+    why: 计费与账户模块换成占位、当前用户对齐本机单用户、建单与列单走 local；登录、充值、退款、派单、计价登记为不适用
+  - glob: ["server/tests/test_create_job_integration.py", "server/tests/integration/test_api_e2e.py"]
+    as: modify
+    why: 去掉登录会话与余额，接口改用进程内 TestClient 与临时库；费率与余额那几条登记为不适用
+  - glob: ["server/tests/test_pp_lang.py"]
+    as: modify
+    why: 提示词从包里的 _pp_prompts.py 读（vendor 不搬，g4）；线上读 vendor 下三份 .md
+  - glob: ["server/pytest.ini"]
+    as: modify
+    why: 连库测试（infra）本机用临时库、默认一起跑；integration 那份整份登记为不适用
+  - glob: ["server/tests/integration/README*.md"]
+    as: skip
+    why: 线上 docker 与云端端到端的跑法说明，本机不适用
+
+  # ───────────── 先拿进来，还没定 ─────────────
+  - glob: ["server/tests/test_health_view_infra.py", "server/tests/test_workflow_view.py"]
     as: defer
-    why: 上面三个模块的测试；其中派单相关的用例可能依赖云端 vendor 目录，拿进来后逐个看
-  - glob: ["server/tests/integration/*", "server/tests/test_api.py", "server/tests/test_worker.py",
-           "server/tests/test_worker_postprocess.py", "server/tests/test_config.py",
-           "server/tests/test_db_guard.py", "server/tests/test_db_integration.py",
-           "server/tests/test_blobstore_integration.py", "server/tests/test_create_job_integration.py",
-           "server/tests/test_schema_covers_code.py",
-           "server/tests/test_claude_gate*.py", "server/tests/test_p3_*.py",
-           "server/tests/test_health_view_infra.py", "server/tests/test_alerts_infra.py",
-           "server/tests/test_balances.py", "server/tests/test_no_degrade_leak.py",
-           "server/tests/test_rate_limit_retry.py", "server/tests/test_lint.py",
-           "server/tests/test_glossary_db_integration.py",
-           "server/tests/test_pp_degraded_integration.py"]
-    as: defer
-    why: 连数据库、存储或云端配置的测试 —— 第 2 步换底座时逐个定：改连本机，或随云端功能删掉
+    why: 在本机跑不通，暴露出运行面板本身在本机坏了（「近况」统计查不出数、「工作流」页签报错）；随运行面板本地化一起改
   - glob: ["src/test/e2e/*"]
     as: defer
-    why: 端到端走查脚本，第 4 步界面减法时按本地流程改
-
-  # ───────────── 先拿进来：测的是本地没搬、或第 5 步改掉的线上行为 ─────────────
-  - glob: ["server/tests/test_pp_runner.py", "server/tests/test_pp_lang.py", "server/tests/test_ds_pricing.py",
-           "server/tests/test_postprocess.py", "server/tests/test_postprocess_api.py", "server/tests/test_workflow_view.py"]
-    as: defer
-    why: 与线上逐字一致，但在本机跑不通——测后处理结账（accounts / pricing）、读 vendor 目录下的提示词与定字脚本、
-         导入证书到期模块（expiries），这些本地都没搬；待逐条改成本机行为（届时登记 modify）或删掉
+    why: 端到端走查脚本，按本地流程改（要装 Playwright）
 
   # ───────────── 兜底：原样同步 ─────────────
   - glob: ["server/app/*", "server/pipeline/*", "server/tests/*", "server/pytest.ini"]

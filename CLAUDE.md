@@ -90,7 +90,7 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q tests                                   # 根目录（识别层 + 同步工具）
-cd backend && python3 -m pytest -q -m "not integration" <测试文件>           # 后端（整目录跑有线上带来的待定测试，见 docs/saas-sync.md）
+cd backend && python3 -m pytest -q                                           # 后端（线上测试里本机没有的功能登记在 conftest.py 的 NOT_APPLICABLE，自动跳过）
 cd frontend && npx tsc --noEmit && npx vitest run && npm run build          # 界面
 ```
 

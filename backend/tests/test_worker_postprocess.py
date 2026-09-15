@@ -93,11 +93,10 @@ def test_watchdog_recovers_stale_pp_jobs(monkeypatch):
     monkeypatch.setattr(worker.config, "WATCHDOG_INTERVAL_SEC", 0.05)
     monkeypatch.setattr(worker, "check_alerts", lambda: None)
     monkeypatch.setattr(worker, "refresh_balances", lambda: None)
-    monkeypatch.setattr(worker.accounts, "sweep_unrefunded_failures", lambda: 0)
     monkeypatch.setattr(worker.jobstore, "fail_stale_queued", lambda *a, **k: 0)
     monkeypatch.setattr(worker.postprocess, "requeue_stale_running",
                         lambda mins, cap: calls.update(n=calls["n"] + 1, args=(mins, cap)) or 0)
-    threads, stop = worker.start_in_thread(with_workers=False)
+    threads, stop = worker.start_in_thread()   # 本机版没有「只起看门狗」的模式；两条队列都打桩成空，工作线程空转
     for _ in range(150):
         if calls["n"] >= 2:
             break

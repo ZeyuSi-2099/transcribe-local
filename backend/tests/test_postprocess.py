@@ -1,5 +1,5 @@
 """后处理纯逻辑单测：steps 归一 / 内容与名称校验 / 定价（无 DB）。"""
-from app import config, postprocess, pricing
+from app import config, postprocess
 
 
 # ── normalize_steps：任意子集 × 固定顺序 ──
@@ -46,6 +46,7 @@ def test_validate_list_allows_empty():
 # ── 定价（2026-08-02 改价）：每步加价率×分钟、按秒折算，快照原则同转录 ──
 
 def test_postprocess_rate_stacks_per_step():
+    from app import pricing   # 本机版：计费模块不搬，只在这两条（登记为不适用）里导入
     # 选几步加几步；步骤名必须与 STEPS 完全一致（改名会让快照对不上）
     assert set(pricing.PP_STEP_RATES_CENTS) == set(postprocess.STEPS)
     assert pricing.postprocess_rate_cents_per_min(["narrate"]) == pricing.PP_STEP_RATES_CENTS["narrate"]
@@ -54,6 +55,7 @@ def test_postprocess_rate_stacks_per_step():
 
 
 def test_postprocess_price_prorates_by_second():
+    from app import pricing
     # 60 分钟全选 = 合计费率 × 60；10 分 30 秒单步 = 四舍五入到分
     full = sum(pricing.PP_STEP_RATES_CENTS.values())
     assert pricing.postprocess_price_cents(list(postprocess.STEPS), 3600) == full * 60
