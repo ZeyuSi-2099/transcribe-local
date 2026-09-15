@@ -30,6 +30,8 @@ interface HistoryPageProps {
   onOpenLive?: () => void;
   /** 失败行重试。抛错即视为「没重试成」，理由由本组件显示在该行上。 */
   onRetry?: (f: HistoryItem) => void | Promise<unknown>;
+  /** 本机版：处理中 / 排队中的行取消。点一次变「确认取消」，再点才真取消；抛错时理由显示在该行上。 */
+  onCancel?: (f: HistoryItem) => void | Promise<unknown>;
 }
 
 // 列宽：状态/转录于两列留出右侧余量——英文长徽章(Failed · no charge)与长日期(Yesterday 10:08)
@@ -57,8 +59,12 @@ const ROW_MIN_WIDTH = 720;
 
 const mono = (size = 13): React.CSSProperties => ({ fontFamily: fonts.mono, fontSize: size, fontVariantNumeric: "tabular-nums" });
 
-function StatusBadge({ st, expired }: { st: HistoryItem["st"]; expired?: boolean }) {
+function StatusBadge({ st, expired, canceled }: { st: HistoryItem["st"]; expired?: boolean; canceled?: boolean }) {
   const L = useL();
+  if (canceled) {
+    // 本机版：用户自己取消的单，库里记成 failed，但它不是「失败」——不用金色喊人动手，给中性灰
+    return <span style={{ display: "inline-flex", fontSize: 11, fontWeight: 500, padding: "3px 9px", borderRadius: radius.pill, background: semantic.surface.sunken, color: semantic.text.muted }}>{L("已取消", "Canceled")}</span>;
+  }
   if (expired) {
     // 完成但超 30 天，内容已删 → 中性「已过期」徽章（仍是完成态，只是内容没了）
     return <span style={{ display: "inline-flex", fontSize: 11, fontWeight: 500, padding: "3px 9px", borderRadius: radius.pill, background: semantic.surface.sunken, color: semantic.text.muted }}>{L("已过期", "Expired")}</span>;
@@ -111,9 +117,10 @@ const ERROR_EN: Record<string, string> = {
   "转录失败，请重试；本次不计费": "Transcription failed — please try again. This run was not billed.",
   "登录已过期，请重新登录": "Session expired — please sign in again.",   // 前端 401 停轮询话术（lib/flow）
   "后处理失败，请重试；本次不计费": "Post-processing failed — please try again. This run was not billed.",
+  "已取消": "Canceled",   // 本机版：取消任务（app/local.py 的 CANCELED_PUBLIC）
 };
 
-export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = true, liveRow, onOpenLive, onRetry }: HistoryPageProps) {
+export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = true, liveRow, onOpenLive, onRetry, onCancel }: HistoryPageProps) {
   const L = useL();
   const [filter, setFilter] = useState("all");
   // 项目筛选："all"=所有 / "none"=未分组 / 项目 id。项目被删后筛选值失效 → 视同 "all"
@@ -121,6 +128,8 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
   // 行号 → 「…」表示进行中，其余表示这次重试被拒的理由（按行号存：HistoryItem 类型里没有 id）
   const errText = useErrText();
   const [retry, setRetry] = useState<Record<number, string>>({});
+  // 行号 → "confirm" 等二次确认 / "…" 取消中 / 其余是这次取消被拒的理由
+  const [cancel, setCancel] = useState<Record<number, string>>({});
   const items = liveRow ? [liveRow, ...rows] : rows;
   // 后处理加工中行的步内 % 模拟（后端只给步索引）：按「本浏览器首次观察到该步」起匀速爬，
   // 键带步索引 → 步间硬切换重新起爬（与接力卡同思路；observedClimb 无时长时 600s 兜底爬满）
@@ -227,6 +236,27 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
               style={{ border: `1px solid ${semantic.border.strong}`, borderRadius: radius.sm, background: "transparent", fontFamily: fonts.sans, fontSize: 12, fontWeight: 500, padding: "3px 10px", color: retry[i] === "…" ? semantic.text.muted : semantic.accent.text, cursor: retry[i] === "…" ? "default" : "pointer", whiteSpace: "nowrap", flex: "0 0 auto" }}
             >{retry[i] === "…" ? L("重试中…", "Retrying…") : L("重试", "Retry")}</button>
           ) : null;
+          // 本机版：处理中 / 排队中可以取消（上传中不行——那一段在浏览器里，还没到后台）
+          const cancelButton = (proc || queued) && onCancel ? (
+            <>
+              {cancel[i] && !["confirm", "…"].includes(cancel[i]) && (
+                <span style={{ fontSize: 12, lineHeight: 1.5, color: semantic.warning.text, minWidth: 0 }}>{cancel[i]}</span>
+              )}
+              <button
+                className="tx-focus"
+                disabled={cancel[i] === "…"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (cancel[i] !== "confirm") { setCancel((s) => ({ ...s, [i]: "confirm" })); return; }
+                  setCancel((s) => ({ ...s, [i]: "…" }));
+                  Promise.resolve(onCancel(item))
+                    .then(() => setCancel((s) => { const n = { ...s }; delete n[i]; return n; }))
+                    .catch((err) => setCancel((s) => ({ ...s, [i]: errText(err) })));
+                }}
+                style={{ border: `1px solid ${cancel[i] === "confirm" ? semantic.warning.icon : semantic.border.strong}`, borderRadius: radius.sm, background: "transparent", fontFamily: fonts.sans, fontSize: 12, fontWeight: 500, padding: "3px 10px", color: cancel[i] === "…" ? semantic.text.muted : cancel[i] === "confirm" ? semantic.warning.text : semantic.text.secondary, cursor: cancel[i] === "…" ? "default" : "pointer", whiteSpace: "nowrap", flex: "0 0 auto" }}
+              >{cancel[i] === "…" ? L("取消中…", "Canceling…") : cancel[i] === "confirm" ? L("确认取消", "Confirm cancel") : L("取消", "Cancel")}</button>
+            </>
+          ) : null;
           return (
             <div
               key={`${item.n}-${i}`}
@@ -268,10 +298,14 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
                           ? `${pct}% · ${L.t("约 {0} 分钟", "~{0} min", item.etaMin)} · ${L("可离开", "can leave")}`
                           : `${pct}% · ${L("可离开", "can leave")}`}
                     </span>
+                    {proc && cancelButton}
                   </div>
                 )}
                 {!item.disconnected && queued && (
-                  <div style={{ marginTop: 7, ...mono(11), color: semantic.text.muted }}>{L("排队中 · 等待开始", "Queued · waiting to start")}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: space.s3, marginTop: 7, flexWrap: "wrap", minWidth: 0 }}>
+                    <span style={{ ...mono(11), color: semantic.text.muted }}>{L("排队中 · 等待开始", "Queued · waiting to start")}</span>
+                    {cancelButton}
+                  </div>
                 )}
                 {expired && (
                   <div style={{ marginTop: 7, ...mono(11), color: semantic.text.muted }}>{L("内容已过期 · 已按隐私策略删除", "Content expired · removed per privacy policy")}</div>
@@ -283,7 +317,7 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
                   <div style={{ display: "flex", alignItems: "center", gap: space.s3, marginTop: 7, flexWrap: "wrap", minWidth: 0 }}>
                     {retry[i] && retry[i] !== "…"
                       ? <span style={{ fontSize: 12, lineHeight: 1.5, color: semantic.warning.text, minWidth: 0 }}>{retry[i]}</span>
-                      : item.error
+                      : item.error && item.error !== "已取消"   // 已取消由状态列说，这里不重复
                         ? <span style={{ fontSize: 12, lineHeight: 1.5, color: semantic.text.muted, minWidth: 0 }}>{L(item.error, ERROR_EN[item.error] ?? item.error)}</span>
                         : null}
                     {retryButton}
@@ -327,7 +361,7 @@ export function HistoryPage({ items: rows = [], onOpen, onNew, empty, loaded = t
                 })()}
               </div>
 
-              <div><StatusBadge st={item.st} expired={item.expired} /></div>
+              <div><StatusBadge st={item.st} expired={item.expired} canceled={item.st === "failed" && item.error === "已取消"} /></div>
               <div style={{ ...mono(), color: semantic.text.muted }}>{L(item.d.zh, item.d.en)}</div>
               <div style={{ fontSize: 13, color: semantic.text.secondary }}>{langName(item.lang, L)}</div>
               <div style={{ textAlign: "right", ...mono(), color: pending ? semantic.text.muted : semantic.text.secondary }}>{pending ? "—" : item.dur}</div>

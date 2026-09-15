@@ -65,9 +65,8 @@ from pathlib import Path
 from . import pp_lang
 from .pp_deepseek import EFFORT, MODEL, call
 
-VENDOR = Path(__file__).resolve().parent / "vendor"
-SKILL_MD = VENDOR / ".claude" / "skills" / "pp-redact" / "SKILL.md"
-SHARED_QC = VENDOR / ".claude" / "skills" / "_shared" / "共性质检.md"
+# 本机版：提示词生成进包里（同 pp_deepseek 与定字提示词，计划页 g4）
+from ._pp_prompts import PP_REDACT as SKILL_MD, SHARED_QC  # noqa: E402
 
 # 与视角转换的第 1 步同口径（6000 字/批、6 路并发）。**不要为了快而调大 BUDGET**：
 # 上面说的清单长度效应就是它带来的，调大等于把已经修好的漏判重新请回来。

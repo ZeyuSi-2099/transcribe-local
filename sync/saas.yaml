@@ -150,9 +150,10 @@ rules:
   - glob: ["server/app/glossary_assist.py"]
     as: modify
     why: 模型地址写死在代码里 → 走统一的模型后端设置（第 5 步）；注释里客户术语库的内部代号原样公开（g5）
-  - glob: ["server/pipeline/pp_deepseek.py", "server/pipeline/pp_runner.py", "server/app/postprocess.py"]
+  - glob: ["server/pipeline/pp_deepseek.py", "server/pipeline/pp_redact_ds.py", "server/pipeline/pp_runner.py",
+           "server/app/postprocess.py"]
     as: modify
-    why: 模型地址写死在代码里 → 走统一的模型后端设置；后处理去掉按分钟收费
+    why: 模型地址写死在代码里 → 走统一的模型后端设置（pipeline/model_backend）；提示词从包里的 _pp_prompts.py 读（vendor 不搬，g4）；后处理不走 claude -p、去掉按分钟收费
   - glob: ["server/requirements.txt", "server/conftest.py"]
     as: modify
     why: 去掉 psycopg / boto3 / 付款相关依赖；测试夹具改连本机 SQLite 与临时目录
@@ -163,6 +164,9 @@ rules:
            "src/screens/main/Result.tsx"]
     as: modify
     why: 去掉公开页与登录路由、余额、充值与所有金额显示；语言不支持的标灰、默认中文；设置只留「数据」；驾驶舱改名运行面板、去掉增长用户退款与增长周报；不上报 Sentry
+  - glob: ["src/lib/api.ts"]
+    as: modify
+    why: 末尾加本机版独有的接口（模型后端设置、数据去哪、首次下载模型、取消任务）；线上已有的函数原样
   - glob: ["src/lib/appI18n/index.ts", "src/lib/appI18n/extractKeys.ts"]
     as: modify
     why: 语种名表改从本地 langNames.ts 取（不搬营销站），合并本地新增文案 local.ts；扫描清单加 App.tsx

@@ -32,11 +32,11 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import ds_pricing, pp_lang
+from . import ds_pricing, model_backend, pp_lang
 
-VENDOR = Path(__file__).resolve().parent / "vendor"
-SKILL_MD = VENDOR / ".claude" / "skills" / "pp-narrate" / "SKILL.md"
-SHARED_QC = VENDOR / ".claude" / "skills" / "_shared" / "共性质检.md"
+# 本机版（与线上不同）：提示词不在 vendor 的 skill 目录里（本地不搬），而是生成进包里的文本，
+# 同定字提示词的做法（计划页 g4）。见 _pp_prompts.py 与 tools/saas_pp_prompts.py。
+from ._pp_prompts import PP_NARRATE as SKILL_MD, SHARED_QC  # noqa: E402
 
 MODEL = os.environ.get("PP_DS_MODEL", "deepseek-flash")
 EFFORT = os.environ.get("PP_DS_EFFORT", "high")   # low/high/max（无 medium）
@@ -618,17 +618,18 @@ def plan(lines, budget):
 # ---------------- 调用 ----------------
 
 def call(system, user, tries=4):
-    headers = {"Authorization": "Bearer " + os.environ["DEEPSEEK_API_KEY"],
-               "Content-Type": "application/json"}
-    body = {"model": MODEL, "temperature": TEMP, "reasoning_effort": EFFORT,
+    # 本机版（与线上不同）：地址、模型、密钥变量、额外参数都取「设置」里那一份模型后端
+    # （pipeline/model_backend），线上这里写死 DeepSeek。reasoning_effort 是 DeepSeek 专属，随预设的 extra 走。
+    url, auth, model, extra = model_backend.openai_endpoint()
+    headers = {**auth, "Content-Type": "application/json"}
+    body = {"model": model, "temperature": TEMP,
             "max_tokens": MAXTOK,
             "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}]}
+                         {"role": "user", "content": user}], **extra}
     data = json.dumps(body).encode()
     for i in range(tries):
         try:
-            req = urllib.request.Request("https://api.deepseek.com/v1/chat/completions",
-                                         data=data, method="POST", headers=headers)
+            req = urllib.request.Request(url, data=data, method="POST", headers=headers)
             with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
                 res = json.load(r)
             break

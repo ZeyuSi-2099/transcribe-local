@@ -28,7 +28,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from app import blobstore, claude_gate, postprocess, speaker_labels
+from app import blobstore, postprocess, speaker_labels
 from app.redact_diff import load_transcript_segments as _load_transcript_segments, segments_to_qa
 # ↑ 后处理输入的唯一算法；api 侧的改动对比要算出同一份稿子，两处分家就会报出假改动
 
@@ -194,10 +194,8 @@ def run(pp: dict) -> None:
     job_id = pp["job_id"]
     steps = pp["steps"]
     step = steps[0] if steps else None
-    # 工作目录放 vendor/Output 下（claude cwd=vendor 根，相对路径读写不出沙箱）；跑完整目录删
-    out_root = VENDOR_ROOT / "Output"
-    out_root.mkdir(parents=True, exist_ok=True)
-    workdir = Path(tempfile.mkdtemp(prefix=f"pp_{job_id[:8]}_", dir=out_root))
+    # 本机版：不走 claude -p，工作目录不必放进 vendor 沙箱，普通临时目录即可；跑完整目录删
+    workdir = Path(tempfile.mkdtemp(prefix=f"pp_{job_id[:8]}_"))
     try:
         # 输入快照（发起时 API 落 R2）：清单内容只认快照，此后改配置不影响本任务
         inputs = json.loads(blobstore.get_bytes(f"postprocess/{job_id}/inputs.json"))
@@ -218,31 +216,15 @@ def run(pp: dict) -> None:
         for idx, step in enumerate(steps, 1):
             postprocess.update_step(job_id, step, idx)
             out_path = workdir / f"{step}.md"
-            # 每步一把独立的 Claude 闸（转录那把也独立），互不挤占
-            gate = claude_gate.DbClaudeGate(f"pp-{job_id}", engine=f"pp_{step}")
-            result = _run_step(step, current, out_path, list_path, gate, directive)
-            if result in ("capped", "gate_full") and step in _DEGRADE:
-                # **撞顶与闸满都降级**（2026-08-13）：不让用户干等，理由见模块头。
-                # 降级失败不判任务失败，退回原路延后重试——兜底挂了不该比没兜底更糟。
-                why = "撞顶" if result == "capped" else "闸满"
-                print(f"[PP] Claude {why} → {_STEP_TITLE.get(step, step)}转 DS-v4-flash 降级路",
-                      flush=True)
-                pp_deepseek.reset_usage()                 # 成本埋点：每步单独计，多步降级各记各的
-                degraded_ok = _DEGRADE[step](current, out_path, list_path, directive, ui_lang) == "ok"
-                cny = pp_deepseek.usage_cny()
-                postprocess.add_ds_cost(job_id, cny)      # 失败也记——钱已经花了
-                print(f"[PP] 降级路用量 {pp_deepseek.usage_snapshot()}｜¥{cny:.4f}", flush=True)
-                if degraded_ok:
-                    postprocess.mark_degraded(job_id, step)   # 留痕：运营页要标出「本单降级产出」
-                    print(f"[PP] 降级路完成 {step}（本单为 DeepSeek 产出）", flush=True)
-                    result = "ok"
-                else:
-                    print("[PP] 降级路也未成功 → 退回延后重试", flush=True)
-            if result in ("capped", "gate_full"):
-                postprocess.requeue_delayed(job_id)   # 回 queued 延后重试，重跑从头开始
-                return
-            if result == "failed":
-                postprocess.set_failed(job_id, step, f"{_STEP_TITLE.get(step, step)} 步执行失败（Claude 硬错/超时/产物缺失）")
+            # 本机版（与线上不同）：不走 claude -p（线上 vendor 的 skill 目录不搬），每一步直接走
+            # OpenAI 协议那条路（线上叫「降级路」），模型后端按「设置」里那一份（pipeline/model_backend）。
+            pp_deepseek.reset_usage()                 # 用量埋点：每步单独计
+            ok = step in _DEGRADE and _DEGRADE[step](current, out_path, list_path, directive, ui_lang) == "ok"
+            cny = pp_deepseek.usage_cny()
+            postprocess.add_ds_cost(job_id, cny)      # 失败也记——走 API 时钱已经花了
+            print(f"[PP] {step} 用量 {pp_deepseek.usage_snapshot()}｜¥{cny:.4f}", flush=True)
+            if not ok:
+                postprocess.set_failed(job_id, step, f"{_STEP_TITLE.get(step, step)} 步执行失败（模型后端调用失败或产物缺失）")
                 return
             qc_file = workdir / f"{step}{_QC_SUFFIX[step]}"
             if qc_file.exists() and qc_file.stat().st_size > 0:

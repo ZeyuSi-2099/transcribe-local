@@ -1062,3 +1062,68 @@ export async function startAdminRefund(email: string, ledgerId: number, amountCe
   });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `refund ${r.status}`);
 }
+
+// ── 本机版独有：模型后端设置 · 数据去哪 · 首次下载模型 · 取消任务 ──────────────────
+// 规则全在后端（pipeline/model_backend.py、app/local_models.py）；这里只取数、只显示。
+
+export type BackendPresetId = "deepseek" | "ollama" | "lmstudio" | "claude" | "custom";
+/** dest：local 不出本机 / remote 发给 host / claude 发给 Anthropic / off 当前后端用不了这一项 */
+export interface DataFlowItem {
+  what: "audio" | "transcript" | "glossary" | "postprocess" | "search";
+  dest: "local" | "remote" | "claude" | "off";
+  host: string;
+}
+export interface BackendView {
+  current: { preset: BackendPresetId; backend: string; model: string; base_url: string; web_search: boolean };
+  presets: { id: BackendPresetId; kind: "api" | "local" | "subscription"; model: string }[];
+  key: { env: string; set: boolean };      // 只有变量名与设没设，后端从不下发密钥的值
+  bochaKey: boolean;
+  dataFlow: DataFlowItem[];
+}
+
+export async function getBackend(): Promise<BackendView> {
+  const r = await fetch(`${BASE}/local/backend`);
+  if (!r.ok) throw await apiError(r, `backend ${r.status}`);
+  return r.json();
+}
+
+export async function saveBackend(body: { preset: string; model?: string; webSearch?: boolean }): Promise<BackendView> {
+  const r = await fetch(`${BASE}/local/backend`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!r.ok) throw await apiError(r, `backend-save ${r.status}`);
+  return r.json();
+}
+
+export async function probeBackend(): Promise<{ ok: boolean; why: string }> {
+  const r = await fetch(`${BASE}/local/backend/probe`, { method: "POST" });
+  if (!r.ok) throw await apiError(r, `backend-probe ${r.status}`);
+  return r.json();
+}
+
+export interface ModelsStatus {
+  models: { id: string; sizeMb: number; installed: boolean }[];
+  ready: boolean;
+  missingMb: number;
+  cacheDir: string;
+  download: { running: boolean; current: string | null; doneBytes: number; totalBytes: number; error: string | null };
+}
+
+export async function getModels(): Promise<ModelsStatus> {
+  const r = await fetch(`${BASE}/local/models`);
+  if (!r.ok) throw await apiError(r, `models ${r.status}`);
+  return r.json();
+}
+
+export async function pullModels(): Promise<ModelsStatus> {
+  const r = await fetch(`${BASE}/local/models/pull`, { method: "POST" });
+  if (!r.ok) throw await apiError(r, `models-pull ${r.status}`);
+  return r.json();
+}
+
+/** 取消任务：排队中的立刻取消；在跑的由后台结束子进程（几秒内），列表轮询会看到它变成「已取消」。 */
+export async function cancelJob(jobId: string): Promise<{ state: "canceled" | "requested" }> {
+  const r = await fetch(`${BASE}/jobs/${jobId}/cancel`, { method: "POST" });
+  if (!r.ok) throw await apiError(r, `cancel ${r.status}`);
+  return r.json();
+}

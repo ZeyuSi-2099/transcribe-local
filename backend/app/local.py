@@ -21,6 +21,40 @@ def create_job(audio_key: str, lang: str, recording_type: str, *, file_name: str
     return str(row[0])
 
 
+# 取消的单记成 failed（界面不用多认一种状态，想重来点「重试」即可），话术固定这一句
+CANCELED_PUBLIC = "已取消"
+
+
+def cancel_job(job_id: str) -> str:
+    """排队中的直接判取消；在跑的立一个标记，后台看到就结束子进程。
+    返回 canceled（已取消）/ requested（已通知后台）/ not_active（已经结束，不用取消）。"""
+    with db.connect() as conn:
+        row = conn.execute(
+            "UPDATE jobs SET status='failed', error='canceled', error_public=%s, updated_at=now() "
+            "WHERE id=%s AND status='queued' RETURNING id", (CANCELED_PUBLIC, job_id)).fetchone()
+        if row:
+            return "canceled"
+        row = conn.execute(
+            "UPDATE jobs SET cancel_requested=1 WHERE id=%s AND status='running' RETURNING id",
+            (job_id,)).fetchone()
+    return "requested" if row else "not_active"
+
+
+def cancel_requested(job_id: str) -> bool:
+    with db.connect() as conn:
+        row = conn.execute("SELECT cancel_requested FROM jobs WHERE id=%s", (job_id,)).fetchone()
+    return bool(row and row[0])
+
+
+def finish_canceled(job_id: str) -> bool:
+    """子进程已结束后调用：running → failed（已取消）。已经跑完（done）的不改。"""
+    with db.connect() as conn:
+        row = conn.execute(
+            "UPDATE jobs SET status='failed', error='canceled', error_public=%s, cancel_requested=0, "
+            "updated_at=now() WHERE id=%s AND status='running' RETURNING id", (CANCELED_PUBLIC, job_id)).fetchone()
+    return row is not None
+
+
 def list_jobs(email: str) -> list[dict]:
     """同线上：最近 200 单。costCents 恒为 0（本机不收费），projectId 恒为空（项目已下架）。"""
     with db.connect() as conn:

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     id                 TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + abs(random()) % 4, 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))),
     user_email         TEXT,
     status             TEXT NOT NULL DEFAULT 'queued',     -- queued|running|done|failed
+    cancel_requested   INTEGER NOT NULL DEFAULT 0,          -- 本机版：用户点了取消，后台看到就结束子进程
     phase              TEXT,                               -- P0|P1|P2|P3|P4|done|NULL
     progress           INTEGER NOT NULL DEFAULT 0,
     lang               TEXT,

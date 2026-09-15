@@ -6,7 +6,7 @@ import { useL } from "./lib/i18n";
 import { semantic, layout, radius, shadow, type as ttype } from "./styles/tokens";
 import { useFlow, etaMinutes, observedClimb } from "./lib/flow";
 import { fmtClock, toSec } from "./lib/format";
-import { getPostprocess, getResult, getReview, getReviewState, listJobs, retryJob, listGlossaries, createGlossary, updateGlossary, deleteGlossary, type Glossary, type JobRow, type Me, type PostprocessStatus, type ReviewStateBlob, type TranscriptRow } from "./lib/api";
+import { cancelJob, getPostprocess, getResult, getReview, getReviewState, listJobs, retryJob, listGlossaries, createGlossary, updateGlossary, deleteGlossary, type Glossary, type JobRow, type Me, type PostprocessStatus, type ReviewStateBlob, type TranscriptRow } from "./lib/api";
 import type { ReviewItem } from "./lib/reviewData";
 import type { HistoryItem } from "./lib/sampleData";
 import { Sidebar } from "./components/Sidebar";
@@ -326,6 +326,13 @@ export function AppShell({
           onRetry={async (f) => {
             await retryJob((f as HistoryItem & { id: string }).id);
             // 新单一进列表，上面那个「有在途任务就轮询」的 effect 自己会起来跑进度。
+            setJobs(await listJobs());
+          }}
+          onCancel={async (f) => {
+            // 实时那一行（刚上传的这单）身上没有 id，用 flow 记着的那个
+            const id = (f as HistoryItem & { id?: string }).id ?? (f === liveRow ? flow.jobId : null);
+            if (!id) return;
+            await cancelJob(id);
             setJobs(await listJobs());
           }}
         />

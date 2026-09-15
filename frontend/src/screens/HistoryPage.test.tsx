@@ -34,6 +34,26 @@ describe("HistoryPage", () => {
     // 本机版：没有计费列，失败行也不说「未计费」
     expect(screen.queryByText(/未计费|No charge/)).toBeNull();
   });
+  // 本机版：处理中的行可以取消，点一次变「确认取消」，再点才真取消
+  it("处理中的行可以取消（两步确认）", async () => {
+    const onCancel = vi.fn();
+    wrap(<HistoryPage items={HISTORY_ITEMS} onNew={vi.fn()} onOpen={vi.fn()} onCancel={onCancel} />);
+    await userEvent.click(screen.getByRole("button", { name: /^取消$|^Cancel$/ }));
+    expect(onCancel).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /确认取消|Confirm cancel/ }));
+    expect(onCancel).toHaveBeenCalledWith(expect.objectContaining({ st: "processing" }));
+    // 已完成、失败的行没有取消按钮：样本里只有一条处理中
+    expect(screen.queryAllByRole("button", { name: /^取消$|^Cancel$|确认取消/ }).length).toBeLessThanOrEqual(1);
+  });
+  // 本机版：取消的单库里记成 failed，状态列说「已取消」（中性灰），不说「失败」；「重试」照样在
+  it("取消的单：状态列写「已取消」，仍可重试", () => {
+    const items = [{ n: "丙.m4a", d: { zh: "刚刚", en: "Just now" }, dur: "1:00", cost: 0, lang: "zh",
+                     st: "failed" as const, error: "已取消" }];
+    wrap(<HistoryPage items={items} onNew={vi.fn()} onOpen={vi.fn()} onRetry={vi.fn()} />);
+    expect(screen.getAllByText(/^已取消$|^Canceled$/)).toHaveLength(1);
+    expect(screen.queryByText(/^失败$|^Failed$/, { selector: "span" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^重试$|^Retry$/ })).toBeInTheDocument();
+  });
   it("opens a done row", async () => {
     const onOpen = vi.fn();
     wrap(<HistoryPage items={HISTORY_ITEMS} onNew={vi.fn()} onOpen={onOpen} />);

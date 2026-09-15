@@ -364,6 +364,69 @@ def admin_refresh_deepseek(request: Request):
     return r
 
 
+# ── 本机版独有：模型后端设置 · 数据去哪 · 首次下载模型 · 取消任务 ───────────────────
+
+def _backend_view() -> dict:
+    from pipeline import model_backend as mb
+    cur = mb.current()
+    return {
+        "current": {k: cur[k] for k in ("preset", "backend", "model", "base_url", "web_search")},
+        "presets": [{"id": p["id"], "kind": p["kind"], "model": p["model"]} for p in mb.PRESETS],
+        "key": mb.key_status(cur),                          # 只报变量名与设没设，不报值
+        "bochaKey": bool(os.environ.get("BOCHA_API_KEY")),
+        "dataFlow": mb.data_flow(),
+    }
+
+
+@app.get("/api/local/backend")
+def local_backend(request: Request):
+    _current_email(request)
+    return _backend_view()
+
+
+@app.put("/api/local/backend")
+def local_backend_save(request: Request, body: dict = Body(...)):
+    _current_email(request)
+    from pipeline import model_backend as mb
+    try:
+        mb.save(str(body.get("preset") or ""), model=body.get("model"),
+                web_search=body.get("webSearch") if "webSearch" in body else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _backend_view()
+
+
+@app.post("/api/local/backend/probe")
+def local_backend_probe(request: Request):
+    _current_email(request)
+    from pipeline import model_backend as mb
+    return mb.probe()
+
+
+@app.get("/api/local/models")
+def local_models_status(request: Request):
+    _current_email(request)
+    from . import local_models
+    return local_models.status()
+
+
+@app.post("/api/local/models/pull")
+def local_models_pull(request: Request):
+    _current_email(request)
+    from . import local_models
+    local_models.start_pull()
+    return local_models.status()
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, request: Request):
+    _owned_job(job_id, request)
+    state = local.cancel_job(job_id)
+    if state == "not_active":
+        raise HTTPException(status_code=409, detail="这个任务已经结束，不用取消")
+    return {"state": state}
+
+
 @app.get("/api/me")
 def get_me(request: Request):
     """本机版：单用户，打开就用，自己就是管理员。余额、免费额度、推荐不再下发。"""

@@ -56,7 +56,8 @@ GAP_MAX = 60                       # 单条缺口字数，与 glossary.GAP_MAX_C
 MEANING_MAX = 150                  # 与 lib/glossary.ts 同口径
 TOTAL_MAX = 8000
 
-_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
+# 本机版（与线上不同）：地址、模型、密钥都取「设置」里那一份模型后端（pipeline/model_backend）。
+# 线上这里写死 DeepSeek；MODEL 仍留着给运行面板显示默认值。
 
 
 class AssistUnavailable(RuntimeError):
@@ -201,12 +202,19 @@ def _lang_note(ui_lang: str | None) -> str:
 """
 
 
+def _endpoint() -> tuple[str, dict, str]:
+    from pipeline import model_backend
+    try:
+        url, headers, model, _extra = model_backend.openai_endpoint()
+    except model_backend.BackendUnavailable as e:
+        raise AssistUnavailable(str(e)) from e
+    return url, headers, model
+
+
 def _post(messages: list[dict], *, json_mode: bool = True) -> str:
-    key = os.environ.get("DEEPSEEK_API_KEY")
-    if not key:
-        raise AssistUnavailable("DEEPSEEK_API_KEY 未配置")
+    endpoint, headers, model = _endpoint()
     body: dict[str, Any] = {
-        "model": MODEL,
+        "model": model,
         "messages": messages,
         "temperature": 0.3,
     }
@@ -214,7 +222,7 @@ def _post(messages: list[dict], *, json_mode: bool = True) -> str:
         body["response_format"] = {"type": "json_object"}
     try:
         with httpx.Client(timeout=TIMEOUT_SEC) as c:
-            r = c.post(_ENDPOINT, json=body, headers={"Authorization": f"Bearer {key}"})
+            r = c.post(endpoint, json=body, headers=headers)
             r.raise_for_status()
             data = r.json()
     except Exception as e:                       # 网络/鉴权/超时一律归为「暂时不可用」
@@ -269,11 +277,9 @@ class _ObjScanner:
 
 def _post_stream(messages: list[dict]):
     """流式调用，逐块 yield 文本增量。异常一律归为 AssistUnavailable。"""
-    key = os.environ.get("DEEPSEEK_API_KEY")
-    if not key:
-        raise AssistUnavailable("DEEPSEEK_API_KEY 未配置")
+    endpoint, headers, model = _endpoint()
     body: dict[str, Any] = {
-        "model": MODEL,
+        "model": model,
         "messages": messages,
         "temperature": 0.3,
         "stream": True,
@@ -281,8 +287,7 @@ def _post_stream(messages: list[dict]):
     }
     try:
         with httpx.Client(timeout=TIMEOUT_SEC) as c:
-            with c.stream("POST", _ENDPOINT, json=body,
-                          headers={"Authorization": f"Bearer {key}"}) as r:
+            with c.stream("POST", endpoint, json=body, headers=headers) as r:
                 r.raise_for_status()
                 for line in r.iter_lines():
                     if not line.startswith("data:"):

@@ -2,11 +2,16 @@
 
 `jobstore`/`blobstore` 为模块级名字，便于测试 monkeypatch。
 
-本机版（与线上不同）：单进程、一次一单。去掉了线上的结算与返还、付款对账、云机器派单、
+本机版（与线上不同）：一次一单。去掉了线上的结算与返还、付款对账、云机器派单、
 增长周报、数据库备份检查。转录入口是本地识别层 `pipeline.local_orchestrator.transcribe`
 （与线上 orchestrator.transcribe 同签名），用到时才导入 —— 它会拉起识别引擎，接口进程平时用不到。
+
+每一单在**单独的子进程**里跑（TRANSCRIBE_ISOLATE_JOBS=0 关掉，调试用）：四台引擎在原生线程里解码，
+没法中途叫停；用户点「取消」时直接结束子进程，内存和算力立刻放出来，也不会留下半截稿子。
 """
+import importlib
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -18,7 +23,10 @@ import traceback
 from pipeline import pp_runner
 from pipeline.transcript import to_json
 
-from . import alerts, balances, blobstore, config, glossary, jobstore, postprocess
+from . import alerts, balances, blobstore, config, glossary, jobstore, local, postprocess
+
+ISOLATE = os.environ.get("TRANSCRIBE_ISOLATE_JOBS", "1") != "0"
+CANCEL_POLL_SEC = 0.5
 
 
 def _transcode_to_m4a(flac_path: str, out_path: str) -> None:
@@ -41,7 +49,7 @@ def process_one() -> bool:
     job = jobstore.claim_next_queued()
     if job is None:
         return False
-    _process_job(job)
+    (_run_isolated if ISOLATE else _process_job)(job)
     return True
 
 
@@ -54,15 +62,52 @@ def process_one_pp() -> bool:
     return True
 
 
-def _process_job(job) -> None:
+def _child_main(job, database_path: str, blob_dir: str, workdir: str) -> None:
+    """子进程入口。spawn 出来是一个全新的解释器，存储位置从父进程带过来（测试会改它们）。"""
+    config.DATABASE_PATH, config.BLOB_DIR = database_path, blob_dir
+    _process_job(job, workdir)
+
+
+def _run_isolated(job) -> None:
+    """在子进程里跑一单；期间每半秒看一眼有没有人点「取消」。"""
+    workdir = tempfile.mkdtemp(prefix=f"job_{job.id}_")
+    proc = multiprocessing.get_context("spawn").Process(
+        target=_child_main, args=(job, config.DATABASE_PATH, config.BLOB_DIR, workdir), name=f"job-{job.id[:8]}")
+    proc.start()
+    canceled = False
+    try:
+        while proc.is_alive():
+            proc.join(CANCEL_POLL_SEC)
+            if proc.is_alive() and local.cancel_requested(job.id):
+                proc.terminate()
+                proc.join(5)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join()
+                canceled = local.finish_canceled(job.id)
+        if canceled:
+            # 不留半截：回放音频可能已经写了；稿子与复核只在最后一步才写，没到那一步就没有
+            if blobstore.exists(f"audio/{job.id}.m4a"):
+                blobstore.delete(f"audio/{job.id}.m4a")
+            print(f"已取消 job={job.id}", flush=True)
+        elif proc.exitcode != 0:
+            # 子进程被系统杀掉（比如内存不够）时它自己来不及写失败，这里补上
+            jobstore.set_failed(job.id, f"转录子进程异常退出（exitcode={proc.exitcode}）")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _process_job(job, workdir: str | None = None) -> None:
     """处理一个**已领取**的作业：读音频→转录→存结果。异常吞掉落 set_failed。"""
     suffix = os.path.splitext(job.audio_key)[1] or ".bin"
     # 每任务专属临时目录：输入 + 转码与切块 + 各阶段稿 + 回放 m4a 全进这里，转完无论成败整目录删掉
-    workdir = tempfile.mkdtemp(prefix=f"job_{job.id}_")
+    workdir = workdir or tempfile.mkdtemp(prefix=f"job_{job.id}_")
     input_path = os.path.join(workdir, f"input{suffix}")
     audio_key = None
     try:
-        from pipeline.local_orchestrator import transcribe
+        # 换转录入口用 TRANSCRIBE_ORCHESTRATOR（测试里换成一个假的，验证取消）
+        transcribe = importlib.import_module(
+            os.environ.get("TRANSCRIBE_ORCHESTRATOR", "pipeline.local_orchestrator")).transcribe
 
         blobstore.download_to(job.audio_key, input_path)
         t0 = time.time()

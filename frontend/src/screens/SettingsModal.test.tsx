@@ -61,3 +61,42 @@ describe("SettingsModal · 删除转录记录", () => {
     expect(onPurged).not.toHaveBeenCalled();
   });
 });
+
+describe("SettingsModal · 模型后端与数据去哪", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  const flow = (dest: api.DataFlowItem["dest"], host = ""): api.DataFlowItem[] => [
+    { what: "audio", dest: "local", host: "" },
+    { what: "transcript", dest, host }, { what: "glossary", dest, host }, { what: "postprocess", dest, host },
+  ];
+  const view = (preset: api.BackendPresetId, dataFlow: api.DataFlowItem[]): api.BackendView => ({
+    current: { preset, backend: "openai", model: preset === "ollama" ? "qwen3:8b" : "deepseek-flash",
+               base_url: "", web_search: false },
+    presets: [{ id: "deepseek", kind: "api", model: "deepseek-flash" }, { id: "ollama", kind: "local", model: "qwen3:8b" },
+              { id: "lmstudio", kind: "local", model: "m" }, { id: "claude", kind: "subscription", model: "opus" }],
+    key: preset === "deepseek" ? { env: "DEEPSEEK_API_KEY", set: false } : { env: "", set: false },
+    bochaKey: false, dataFlow,
+  });
+  const destOf = () => [...screen.getByTestId("data-flow").querySelectorAll("[data-dest]")].map((e) => e.getAttribute("data-dest"));
+
+  it("换到本机模型：保存后「数据去哪」跟着变成全部不出本机", async () => {
+    vi.spyOn(api, "getBackend").mockResolvedValue(view("deepseek", flow("remote", "api.deepseek.com")));
+    const save = vi.spyOn(api, "saveBackend").mockResolvedValue(view("ollama", flow("local")));
+    wrap(<SettingsModal open onClose={vi.fn()} />);
+    expect((await screen.findAllByText("发给 api.deepseek.com")).length).toBe(3);
+    expect(destOf()).toEqual(["local", "remote", "remote", "remote"]);          // 录音永远不出本机
+    expect(screen.getByText(/DEEPSEEK_API_KEY 读取 · 未设置/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: /本机 Ollama/ }));
+    expect(save).toHaveBeenCalledWith({ preset: "ollama" });
+    await waitFor(() => expect(destOf()).toEqual(["local", "local", "local", "local"]));
+    expect(screen.getByRole("radio", { name: /本机 Ollama/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText(/DEEPSEEK_API_KEY/)).toBeNull();
+  });
+
+  it("测试连接：把结果说出来", async () => {
+    vi.spyOn(api, "getBackend").mockResolvedValue(view("ollama", flow("local")));
+    vi.spyOn(api, "probeBackend").mockResolvedValue({ ok: false, why: "ConnectError" });
+    wrap(<SettingsModal open onClose={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("button", { name: /测试连接|Test connection/ }));
+    expect((await screen.findByRole("status")).textContent).toBe("连不上：ConnectError");
+  });
+});

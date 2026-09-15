@@ -228,3 +228,7 @@ def init_schema() -> None:
     with connect() as conn:
         conn._raw.execute("PRAGMA journal_mode = WAL")    # 接口线程与后台线程同时读写
         conn._raw.executescript(_SCHEMA.read_text(encoding="utf-8"))
+        # 后加的列给老库补上：CREATE TABLE IF NOT EXISTS 不会往已有的表里加列
+        cols = {r[1] for r in conn._raw.execute("PRAGMA table_info(jobs)")}
+        if "cancel_requested" not in cols:
+            conn._raw.execute("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
