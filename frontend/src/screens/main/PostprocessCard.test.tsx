@@ -396,14 +396,15 @@ describe("PostprocessCard 五态", () => {
     expect(screen.queryByRole("button", { name: /查看报告|View report/ })).toBeNull();
   });
 
-  it("失败态：pill「失败 · 未计费」+ 点名失败步；改选处理回可发起并预选上次组合", async () => {
+  it("失败态：pill「失败」+ 点名失败步；改选处理回可发起并预选上次组合", async () => {
     mockFetch({
       status: { ...RUNNING, status: "failed", failedStep: "redact", steps: ["narrate", "redact"] },
       afterStart: RUNNING,
     });
     wrap();
     expect(await screen.findByText(/后处理没跑完|didn't finish/)).toBeInTheDocument();
-    expect(screen.getByText(/失败 · 未计费|Failed · not billed/)).toBeInTheDocument();
+    expect(screen.getByText(/^失败$|^Failed$/)).toBeInTheDocument();
+    expect(screen.queryByText(/计费|billed/)).toBeNull();   // 本机版不收费，不提计费
     expect(screen.getByText(/「脱敏」这一步中断了|"Redact" step broke off/)).toBeInTheDocument();
     // 改选处理 → 可发起态，narrate + redact 预选
     await userEvent.click(screen.getByRole("button", { name: /改选处理|Change steps/ }));

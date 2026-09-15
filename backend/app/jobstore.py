@@ -102,7 +102,7 @@ def set_audio_key(job_id: str, audio_key: str) -> None:
         )
 
 
-_DEFAULT_ERROR_PUBLIC = "转录失败，请重试；本次不计费"
+_DEFAULT_ERROR_PUBLIC = "转录失败，请重试"   # 本机版：不收费，去掉线上的「本次不计费」
 
 
 def set_failed(job_id: str, error: str, public: Optional[str] = None) -> bool:

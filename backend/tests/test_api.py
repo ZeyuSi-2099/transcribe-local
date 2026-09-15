@@ -1049,10 +1049,10 @@ def test_get_job_status_error_is_public_not_internal(monkeypatch):
     js.jobs[jid].update(
         status="failed",
         error="Traceback (most recent call last):\n  File \"/app/pipeline/orchestrator.py\", line 42\norganization_balance_exhausted",
-        error_public="转录失败，请重试；本次不计费",
+        error_public="转录失败，请重试",
     )
     r = client.get(f"/api/jobs/{jid}", headers=AUTH)
-    assert r.json()["error"] == "转录失败，请重试；本次不计费"
+    assert r.json()["error"] == "转录失败，请重试"
     assert "Traceback" not in r.json()["error"]
 
 

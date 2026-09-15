@@ -279,8 +279,8 @@ export function RedactChanges({ jobId, data, onLocate, onState }: Props) {
           <div style={{ fontSize: 11, lineHeight: 1.6, color: semantic.text.muted }}>
             {saving
               ? L("正在保存…", "Saving…")
-              : L("改口只影响导出，不重跑、不额外计费。要长期保住某个词，把它加进保留清单。",
-                  "Changes here only affect the export — nothing re-runs and nothing is charged. To keep a word for good, add it to your keep list.")}
+              : L("改口只影响导出，不重跑。要长期保住某个词，把它加进保留清单。",
+                  "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.")}
           </div>
         </div>
       )}

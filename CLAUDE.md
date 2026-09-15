@@ -92,6 +92,7 @@ PYTHONPATH=src python3 -m transcribe_local config --explain chop.max_length
 PYTHONPATH=src python3 -m pytest -q tests                                   # 根目录（识别层 + 同步工具）
 cd backend && python3 -m pytest -q                                           # 后端（线上测试里本机没有的功能登记在 conftest.py 的 NOT_APPLICABLE，自动跳过）
 cd frontend && npx tsc --noEmit && npx vitest run && npm run build          # 界面
+cd frontend && npm run e2e                                                  # 界面走查：真起本机服务、识别换成假的（首次先 npx playwright install chromium）
 ```
 
 ## 改参数之前

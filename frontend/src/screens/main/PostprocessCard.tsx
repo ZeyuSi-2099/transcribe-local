@@ -394,13 +394,13 @@ export function PostprocessCard({ jobId, initialStatus, locked, remaining, durat
         <div style={{ display: "flex", alignItems: "center", gap: space.s2 }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: semantic.accent.text }}>✦ {L("后处理没跑完", "Post-processing didn't finish")}</span>
           <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: radius.pill, background: semantic.accent.bgSoft, color: semantic.danger.fillHover, whiteSpace: "nowrap" }}>
-            {L("失败 · 未计费", "Failed · not billed")}
+            {L("失败", "Failed")}
           </span>
         </div>
         <div style={{ fontSize: 12, lineHeight: 1.65, color: semantic.text.secondary, marginTop: space.s2 }}>
           {fl
-            ? L.t("「{0}」这一步中断了。稿子原样还在，本次不计费——重试会从头跑所选处理。", "The \"{0}\" step broke off. Your transcript is untouched and this run wasn't billed — retrying runs the selected steps from the start.", fl)
-            : L("处理中断了。稿子原样还在，本次不计费——重试会从头跑所选处理。", "The run broke off. Your transcript is untouched and this run wasn't billed — retrying runs the selected steps from the start.")}
+            ? L.t("「{0}」这一步中断了。稿子原样还在——重试会从头跑所选处理。", "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.", fl)
+            : L("处理中断了。稿子原样还在——重试会从头跑所选处理。", "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.")}
         </div>
         {startErr && <div style={{ fontSize: 12, color: semantic.accent.text, marginTop: space.s2 }}>{startErr}</div>}
         <div style={{ display: "flex", gap: space.s2, marginTop: space.s3, alignItems: "center" }}>

@@ -146,7 +146,7 @@ rules:
     why: 登录固定为本机用户、管理员放行；去掉登录、充值、账单、推荐、用户管理的接口
   - glob: ["server/app/worker.py", "server/app/jobstore.py"]
     as: modify
-    why: 单机后台一次一单；去掉结算、退款、云机器派单、讯飞扣减
+    why: 单机后台一次一单；去掉结算、退款、云机器派单、讯飞扣减；失败话术去掉「本次不计费」
   - glob: ["server/app/config.py", "server/app/claude_gate.py", "server/app/account_delete.py"]
     as: modify
     why: 云端环境变量换成本地配置；定字名额闸本机恒放行；只留「删除全部转录」，去掉注销账户
@@ -160,7 +160,7 @@ rules:
   - glob: ["server/pipeline/pp_deepseek.py", "server/pipeline/pp_redact_ds.py", "server/pipeline/pp_runner.py",
            "server/app/postprocess.py"]
     as: modify
-    why: 模型地址写死在代码里 → 走统一的模型后端设置（pipeline/model_backend）；提示词从包里的 _pp_prompts.py 读（vendor 不搬，g4）；后处理不走 claude -p、去掉按分钟收费
+    why: 模型地址写死在代码里 → 走统一的模型后端设置（pipeline/model_backend）；提示词从包里的 _pp_prompts.py 读（vendor 不搬，g4）；后处理不走 claude -p、去掉按分钟收费；失败话术去掉「本次不计费」
   - glob: ["server/requirements.txt", "server/conftest.py"]
     as: modify
     why: 去掉 psycopg / boto3 / 付款相关依赖；测试夹具改连本机 SQLite 与临时目录
@@ -185,6 +185,9 @@ rules:
            "src/lib/ux.guard.test.ts", "src/lib/outlineFile.test.ts"]
     as: modify
     why: 随上面的页面一起改——登录、宣传页、余额、充值、推荐、注销、增长、用户、定价页相关用例去掉，改测本机版的对应行为；其余用例原样
+  - glob: ["src/screens/main/RedactChanges.tsx"]
+    as: modify
+    why: 脱敏改口的说明去掉「不额外计费」（本机不收费）
   - glob: ["src/routes.test.tsx", "src/lib/turnaround.guard.test.tsx"]
     as: skip
     why: 只测公开页路由表与营销站、定价页的出稿时长文案，本地不搬那些页面
@@ -203,7 +206,7 @@ rules:
   # ───────────── 有意不同：连库测试去掉计费用例 ─────────────
   - glob: ["server/tests/test_jobstore_integration.py", "server/tests/test_postprocess_db_integration.py"]
     as: modify
-    why: 去掉测预扣返还与后处理结账的用例（本机不收费）；其余用例原样，改连本机 SQLite 跑
+    why: 去掉测预扣返还与后处理结账的用例（本机不收费）；失败话术断言跟着去掉「本次不计费」；其余用例原样，改连本机 SQLite 跑
 
   # ───────────── 线上测试：本机改过才跑得通的 ─────────────
   # 规则（Duner 2026-09-15 确认）：本地用得上的改到通过；本地根本没有那个功能的用例，登记在
@@ -237,10 +240,9 @@ rules:
     as: modify
     why: 运行面板「工作流」按本机流水线画（术语库助手 · 转码与切块 · 四路本机引擎 · 分歧册 · 定字 · 后处理），去掉 Claude 订阅闸、派单前台指纹、语种编排
 
-  # ───────────── 先拿进来，还没定 ─────────────
   - glob: ["src/test/e2e/*"]
-    as: defer
-    why: 端到端走查脚本，按本地流程改（要装 Playwright）
+    as: modify
+    why: 界面走查改成真起本机服务、只把识别换成假的（backend/tests/e2e_orchestrator.py）；走「选文件 → 开始转录 → 点开看稿」和「转录失败」两条路。线上是全部接口打桩、再加 docker 真全栈联调说明
 
   # ───────────── 兜底：原样同步 ─────────────
   - glob: ["server/app/*", "server/pipeline/*", "server/tests/*", "server/pytest.ini"]

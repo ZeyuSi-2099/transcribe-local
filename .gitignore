@@ -39,3 +39,7 @@ config.yaml
 # 本机跑验收时的工作目录
 .run/
 /.playwright-mcp/
+
+# 界面走查（Playwright）的输出
+/frontend/test-results/
+/frontend/playwright-report/

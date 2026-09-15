@@ -114,9 +114,9 @@ function StatusBadge({ st, expired, canceled }: { st: HistoryItem["st"]; expired
 // ⚠️ 重试被拒的那三种理由 2026-08-30 **已经不在这张表里了**：它们是 HTTP 响应、不是库里的行，
 // 所以走了错误码（`lib/userErrors.ts`）。别再往这张表里加新的——这里只收「已经写进库的历史话术」。
 const ERROR_EN: Record<string, string> = {
-  "转录失败，请重试；本次不计费": "Transcription failed — please try again. This run was not billed.",
+  "转录失败，请重试": "Transcription failed — please try again.",   // 本机版：不收费，去掉线上的「本次不计费」
   "登录已过期，请重新登录": "Session expired — please sign in again.",   // 前端 401 停轮询话术（lib/flow）
-  "后处理失败，请重试；本次不计费": "Post-processing failed — please try again. This run was not billed.",
+  "后处理失败，请重试": "Post-processing failed — please try again.",
   "已取消": "Canceled",   // 本机版：取消任务（app/local.py 的 CANCELED_PUBLIC）
 };
 

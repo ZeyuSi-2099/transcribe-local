@@ -160,10 +160,10 @@ describe("HistoryPage", () => {
 
   it("shows the desensitized failure reason on a failed row when present", () => {
     const items = [
-      { n: "失败任务.m4a", d: { zh: "刚刚", en: "Just now" }, dur: "10:00", cost: 0, lang: "zh", st: "failed" as const, error: "转录失败，请重试；本次不计费" },
+      { n: "失败任务.m4a", d: { zh: "刚刚", en: "Just now" }, dur: "10:00", cost: 0, lang: "zh", st: "failed" as const, error: "转录失败，请重试" },
     ];
     wrap(<HistoryPage items={items} onNew={vi.fn()} onOpen={vi.fn()} />);
-    expect(screen.getByText("转录失败，请重试；本次不计费")).toBeInTheDocument();
+    expect(screen.getByText("转录失败，请重试")).toBeInTheDocument();
   });
 
   it("does not crash and shows no reason line when a failed row has no error", () => {
@@ -179,13 +179,13 @@ describe("HistoryPage", () => {
   it("重试被拒时，理由显示在那一行上，并盖过原来的失败原因", async () => {
     const items = [
       { n: "失败.m4a", d: { zh: "刚刚", en: "Just now" }, dur: "10:00", cost: 0, lang: "zh",
-        st: "failed" as const, error: "转录失败，请重试；本次不计费" },
+        st: "failed" as const, error: "转录失败，请重试" },
     ];
     const onRetry = vi.fn().mockRejectedValue(new Error("录音已超过保留期，无法重试；请重新上传"));
     wrap(<HistoryPage items={items} onNew={vi.fn()} onOpen={vi.fn()} onRetry={onRetry} />);
     await userEvent.click(screen.getByRole("button", { name: /^重试$|^Retry$/ }));
     expect(await screen.findByText("录音已超过保留期，无法重试；请重新上传")).toBeInTheDocument();
-    expect(screen.queryByText("转录失败，请重试；本次不计费")).toBeNull();
+    expect(screen.queryByText("转录失败，请重试")).toBeNull();
   });
 
   it("重试进行中按钮不可重复点（连点两下只发一次）", async () => {
@@ -214,11 +214,11 @@ describe("HistoryPage", () => {
   it("英文界面下已知失败话术显示英文翻译，不蹦中文", () => {
     localStorage.setItem("tx_lang", "en");
     const items = [
-      { n: "failed.m4a", d: { zh: "刚刚", en: "Just now" }, dur: "10:00", cost: 0, lang: "zh", st: "failed" as const, error: "转录失败，请重试；本次不计费" },
+      { n: "failed.m4a", d: { zh: "刚刚", en: "Just now" }, dur: "10:00", cost: 0, lang: "zh", st: "failed" as const, error: "转录失败，请重试" },
     ];
     wrap(<HistoryPage items={items} onNew={vi.fn()} onOpen={vi.fn()} />);
     expect(screen.getByText(/Transcription failed/)).toBeInTheDocument();
-    expect(screen.queryByText("转录失败，请重试；本次不计费")).toBeNull();
+    expect(screen.queryByText("转录失败，请重试")).toBeNull();
     localStorage.removeItem("tx_lang");
   });
 

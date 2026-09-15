@@ -67,4 +67,4 @@ def test_postprocess_price_prorates_by_second():
 def test_error_public_is_single_phrase_without_refund_word():
     # 失败话术单句原则 + 全站禁「退款」字样
     assert "退款" not in postprocess.ERROR_PUBLIC
-    assert "不计费" in postprocess.ERROR_PUBLIC
+    assert "计费" not in postprocess.ERROR_PUBLIC   # 本机版不收费：线上这里要求带「不计费」

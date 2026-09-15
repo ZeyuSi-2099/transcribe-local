@@ -106,6 +106,17 @@ export const LOCAL_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
       "Abbrechen",
     "Canceled":
       "Abgebrochen",
+    // 失败与改口的说明去掉「不计费」（本机不收费；线上那几句带计费的原文不再出现）
+    "Transcription failed — please try again.":
+      "Transkription fehlgeschlagen — bitte erneut versuchen.",
+    "Post-processing failed — please try again.":
+      "Nachbearbeitung fehlgeschlagen — bitte erneut versuchen.",
+    "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "Der Schritt „{0}“ ist abgebrochen. Ihr Transkript bleibt unverändert — ein neuer Versuch startet die gewählten Schritte von vorn.",
+    "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "Der Durchlauf ist abgebrochen. Ihr Transkript bleibt unverändert — ein neuer Versuch startet die gewählten Schritte von vorn.",
+    "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.":
+      "Änderungen hier wirken sich nur auf den Export aus – es läuft nichts erneut. Damit ein Wort dauerhaft bleibt, setzen Sie es auf Ihre Schutzliste.",
   },
   fr: {
     "Can't reach the local service": "Service local injoignable",
@@ -207,6 +218,17 @@ export const LOCAL_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
       "Annuler",
     "Canceled":
       "Annulé",
+    // 失败与改口的说明去掉「不计费」（本机不收费；线上那几句带计费的原文不再出现）
+    "Transcription failed — please try again.":
+      "Échec de la transcription — veuillez réessayer.",
+    "Post-processing failed — please try again.":
+      "Échec du post-traitement — veuillez réessayer.",
+    "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "L'étape « {0} » s'est interrompue. Votre transcription est intacte — réessayer relance les étapes choisies depuis le début.",
+    "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "L'exécution s'est interrompue. Votre transcription est intacte — réessayer relance les étapes choisies depuis le début.",
+    "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.":
+      "Les modifications faites ici n'affectent que l'export : rien n'est relancé. Pour conserver un mot durablement, ajoutez-le à votre liste à préserver.",
   },
   es: {
     "Can't reach the local service": "No se puede conectar con el servicio local",
@@ -308,6 +330,17 @@ export const LOCAL_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
       "Cancelar",
     "Canceled":
       "Cancelado",
+    // 失败与改口的说明去掉「不计费」（本机不收费；线上那几句带计费的原文不再出现）
+    "Transcription failed — please try again.":
+      "La transcripción falló: inténtalo de nuevo.",
+    "Post-processing failed — please try again.":
+      "El posprocesamiento falló: inténtalo de nuevo.",
+    "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "El paso «{0}» se interrumpió. Tu transcripción sigue intacta: al reintentar, los pasos elegidos se ejecutan desde el principio.",
+    "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "La ejecución se interrumpió. Tu transcripción sigue intacta: al reintentar, los pasos elegidos se ejecutan desde el principio.",
+    "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.":
+      "Lo que cambies aquí solo afecta a la exportación: no se vuelve a ejecutar nada. Para conservar una palabra de forma permanente, añádela a tu lista protegida.",
   },
   it: {
     "Can't reach the local service": "Impossibile raggiungere il servizio locale",
@@ -409,6 +442,17 @@ export const LOCAL_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
       "Annulla",
     "Canceled":
       "Annullato",
+    // 失败与改口的说明去掉「不计费」（本机不收费；线上那几句带计费的原文不再出现）
+    "Transcription failed — please try again.":
+      "Trascrizione non riuscita: riprova.",
+    "Post-processing failed — please try again.":
+      "Post-elaborazione non riuscita: riprova.",
+    "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "Il passaggio «{0}» si è interrotto. La trascrizione è intatta: riprovando, i passaggi scelti ripartono dall'inizio.",
+    "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "L'esecuzione si è interrotta. La trascrizione è intatta: riprovando, i passaggi scelti ripartono dall'inizio.",
+    "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.":
+      "Le modifiche qui incidono solo sull'esportazione: non viene rieseguito nulla. Per mantenere una parola in modo stabile, aggiungila all'elenco da preservare.",
   },
   pt: {
     "Can't reach the local service": "Não foi possível acessar o serviço local",
@@ -510,6 +554,17 @@ export const LOCAL_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
       "Cancelar",
     "Canceled":
       "Cancelado",
+    // 失败与改口的说明去掉「不计费」（本机不收费；线上那几句带计费的原文不再出现）
+    "Transcription failed — please try again.":
+      "A transcrição falhou: tente de novo.",
+    "Post-processing failed — please try again.":
+      "O pós-processamento falhou: tente de novo.",
+    "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "A etapa “{0}” foi interrompida. Sua transcrição continua intacta: ao tentar de novo, as etapas escolhidas recomeçam do início.",
+    "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "A execução foi interrompida. Sua transcrição continua intacta: ao tentar de novo, as etapas escolhidas recomeçam do início.",
+    "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.":
+      "O que alterar aqui só afeta a exportação: nada é executado de novo. Para manter uma palavra de forma permanente, adicione-a à sua lista protegida.",
   },
   ja: {
     "Can't reach the local service": "ローカルサービスに接続できません",
@@ -611,5 +666,16 @@ export const LOCAL_OVERRIDES: Partial<Record<UILang, AppOverride>> = {
       "キャンセル",
     "Canceled":
       "キャンセル済み",
+    // 失败与改口的说明去掉「不计费」（本机不收费；线上那几句带计费的原文不再出现）
+    "Transcription failed — please try again.":
+      "文字起こしに失敗しました。もう一度お試しください。",
+    "Post-processing failed — please try again.":
+      "後処理に失敗しました。もう一度お試しください。",
+    "The \"{0}\" step broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "「{0}」の途中で中断しました。文字起こしはそのまま残っています。やり直すと、選んだ工程を最初から実行します。",
+    "The run broke off. Your transcript is untouched — retrying runs the selected steps from the start.":
+      "途中で中断しました。文字起こしはそのまま残っています。やり直すと、選んだ工程を最初から実行します。",
+    "Changes here only affect the export — nothing re-runs. To keep a word for good, add it to your keep list.":
+      "ここでの変更は書き出しにのみ反映され、再実行はされません。語を恒久的に残すには保護リストに追加してください。",
   },
 };

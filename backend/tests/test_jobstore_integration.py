@@ -124,11 +124,11 @@ def test_set_failed_persists_public_message_separately():
     jid = jobstore.create_job("audio/x.m4a", "zh", "meeting", "a@b.com")
     jobstore.claim_next_queued()   # set_failed 的终态持有守卫要求先处于 running
     jobstore.set_failed(jid, "Traceback (most recent call last):\n  File \"/app/worker.py\"",
-                         public="转录失败，请重试；本次不计费")
+                         public="转录失败，请重试")
     job = jobstore.get_job(jid)
     assert job.status == "failed"
     assert "Traceback" in job.error
-    assert job.error_public == "转录失败，请重试；本次不计费"
+    assert job.error_public == "转录失败，请重试"
     assert "Traceback" not in job.error_public
 
 

@@ -19,7 +19,7 @@ MAX_LISTS = 20        # 脱敏清单数上限/账户
 MAX_NAME = 40         # 名称长度上限（trim 后码点数，与术语库同口径）
 
 # 面向用户的失败话术（单句原则，同全站转录话术风格；EN 靠前端查表）
-ERROR_PUBLIC = "后处理失败，请重试；本次不计费"
+ERROR_PUBLIC = "后处理失败，请重试"   # 本机版：不收费，去掉线上的「本次不计费」
 
 
 def normalize_steps(steps) -> list | None:
