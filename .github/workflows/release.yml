@@ -2,7 +2,7 @@
 #
 #   打标签：git tag v<版本号> && git push origin v<版本号>    —— 版本号必须与 pyproject.toml 的 version 一致
 #
-# 流程：构建界面 → 测试 → 打安装包（界面必须在包里）→ 装上安装包真起一次服务 → 挂到 GitHub 发布页。
+# 流程：构建界面 → 测试 → 界面走查 → 打安装包（界面必须在包里）→ 装上安装包真起一次服务 → 挂到 GitHub 发布页。
 # 传 PyPI 默认关着：PyPI 那边给本仓库、本文件、环境 pypi 配好「可信发布」之后，
 # 在仓库 Settings → Secrets and variables → Actions → Variables 里加 PUBLISH_PYPI=true 才会传。
 # 在 Actions 页面手动 Run workflow：只跑到「真起一次服务」为止，不发布，用来演练。
@@ -47,6 +47,13 @@ jobs:
         run: |
           pip install . pytest
           PYTHONPATH=src python -m pytest -q tests
+
+      - name: 界面走查（真起本机服务，识别换成假的；说明见 frontend/src/test/e2e/README.md）
+        working-directory: frontend
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg   # 上传时后端用 ffprobe 量时长
+          npx playwright install --with-deps chromium
+          npx playwright test                                            # 界面上一步已构建，不用 npm run e2e 再构建一次
 
       - name: 打安装包（界面不在包里就失败）
         env:
