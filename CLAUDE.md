@@ -139,7 +139,7 @@ cd frontend && npm run e2e                                                  # �
 - [x] 发布包自带构建好的界面（Duner 2026-09-15 定：构建产物不进 git，发版时由 CI 构建，`hatch_build.py` 放进包）。
       发版：`git tag v<pyproject 里的 version> && git push origin v<同上>`，流程见 `.github/workflows/release.yml`
 - [x] 传 PyPI 已配好（2026-09-15）：PyPI 账号 sizeyu2025 登记了待定发布者（仓库 ZeyuSi-2099/transcribe-local · release.yml · 环境 pypi），仓库变量 `PUBLISH_PYPI=true`。打版本标签即自动上传。
-      ⚠️ 待定登记**不占名字**：第一次真正上传之前，别人仍可抢注 `transcribe-local`。
+- [x] **v0.1.0 已发布（2026-09-16）**：GitHub 发布页 + PyPI（`pip install transcribe-local`）。此后 PyPI 上的版本号不能重传，修问题发 0.1.1。发下一版：先改 `pyproject.toml` 与 `src/transcribe_local/__init__.py` 的版本号，再打同名标签。
 - [ ] 英文 profile
 
 ### 远期
