@@ -7,6 +7,9 @@
 
 **埋点失败一律吞掉**（同 p3_health）：监控坏了不许连累主流程。这条纪律没有例外——
 术语库助手那条链路碰不到账本，最坏是「这次没生成出来」，更不该因为记一笔失败而变成 500。
+
+本机版（与线上不同）：线上 stats 用 Postgres 的 percentile_cont / FILTER 聚合；本机库是 SQLite，
+没有这些写法，原样搬来会查询出错、被吞掉，面板恒空。改成取出耗时在 Python 里算分位数，口径相同。
 """
 from datetime import datetime, timedelta, timezone
 
@@ -28,6 +31,17 @@ def record(node: str, outcome: str, *, ms: int | None = None,
         pass
 
 
+def percentile(values: list[float], p: float) -> float | None:
+    """分位数，线性插值——与 Postgres 的 percentile_cont 同一算法。没有样本返回 None。"""
+    vals = sorted(v for v in values if v is not None)
+    if not vals:
+        return None
+    pos = (len(vals) - 1) * p
+    lo = int(pos)
+    hi = min(lo + 1, len(vals) - 1)
+    return vals[lo] + (vals[hi] - vals[lo]) * (pos - lo)
+
+
 def stats(nodes: list[str], hours: int) -> dict[str, dict]:
     """近 N 小时各节点的 {ok, total, p50Ms, p95Ms}。查不到返回 {}（那一格显示「—」）。
 
@@ -39,17 +53,22 @@ def stats(nodes: list[str], hours: int) -> dict[str, dict]:
     try:
         with db.connect() as conn:
             rows = conn.execute(
-                "SELECT node, count(*), count(*) FILTER (WHERE outcome='ok'), "
-                "  percentile_cont(0.5) WITHIN GROUP (ORDER BY ms) FILTER (WHERE ms IS NOT NULL), "
-                "  percentile_cont(0.95) WITHIN GROUP (ORDER BY ms) FILTER (WHERE ms IS NOT NULL) "
-                "FROM node_events WHERE node = ANY(%s) AND at > %s GROUP BY node",
+                "SELECT node, outcome, ms FROM node_events WHERE node = ANY(%s) AND at > %s",
                 (nodes, since),
             ).fetchall()
     except Exception:  # noqa: BLE001
         return {}
-    return {
-        r[0]: {"total": int(r[1]), "ok": int(r[2]),
-               "p50Ms": round(r[3]) if r[3] is not None else None,
-               "p95Ms": round(r[4]) if r[4] is not None else None}
-        for r in rows
-    }
+    acc: dict[str, dict] = {}
+    for node, outcome, ms in rows:
+        a = acc.setdefault(node, {"total": 0, "ok": 0, "ms": []})
+        a["total"] += 1
+        a["ok"] += outcome == "ok"
+        if ms is not None:
+            a["ms"].append(ms)
+    out = {}
+    for node, a in acc.items():
+        p50, p95 = percentile(a["ms"], 0.5), percentile(a["ms"], 0.95)
+        out[node] = {"total": a["total"], "ok": a["ok"],
+                     "p50Ms": round(p50) if p50 is not None else None,
+                     "p95Ms": round(p95) if p95 is not None else None}
+    return out

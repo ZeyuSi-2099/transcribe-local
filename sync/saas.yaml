@@ -153,7 +153,7 @@ rules:
   - glob: ["server/app/health_view.py", "server/app/workflow_view.py", "server/app/alerts.py",
            "server/app/balances.py", "server/app/p3_config.py", "server/app/p3_probe.py"]
     as: modify
-    why: 运营驾驶舱改成本机运行面板：资源看本机（模型、磁盘、内存、定字后端连通、DeepSeek 余额）；告警不发邮件
+    why: 运营驾驶舱改成本机运行面板：统计改在 Python 里聚合（线上 JSONB SQL 在 SQLite 上查不出数）、工作流读本机配置、资源看本机（本地独有的 local_resources）；告警不发邮件
   - glob: ["server/app/glossary_assist.py"]
     as: modify
     why: 模型地址写死在代码里 → 走统一的模型后端设置（第 5 步）；注释里客户术语库的内部代号原样公开（g5）
@@ -227,10 +227,17 @@ rules:
     as: skip
     why: 线上 docker 与云端端到端的跑法说明，本机不适用
 
-  # ───────────── 先拿进来，还没定 ─────────────
   - glob: ["server/tests/test_health_view_infra.py", "server/tests/test_workflow_view.py"]
-    as: defer
-    why: 在本机跑不通，暴露出运行面板本身在本机坏了（「近况」统计查不出数、「工作流」页签报错）；随运行面板本地化一起改
+    as: modify
+    why: 随运行面板本地化改（2026-09-15）：登录码表本机不建；工作流参数断言改成本机配置与常量；登录发码量、证书到期、语种编排、指纹口径登记为不适用
+  - glob: ["server/app/node_events.py"]
+    as: modify
+    why: 节点耗时分位数改在 Python 里算——线上的 percentile_cont / FILTER 在 SQLite 上查询出错、被吞掉，术语库助手的耗时恒空
+  - glob: ["src/screens/admin/WorkflowTab.tsx"]
+    as: modify
+    why: 运行面板「工作流」按本机流水线画（术语库助手 · 转码与切块 · 四路本机引擎 · 分歧册 · 定字 · 后处理），去掉 Claude 订阅闸、派单前台指纹、语种编排
+
+  # ───────────── 先拿进来，还没定 ─────────────
   - glob: ["src/test/e2e/*"]
     as: defer
     why: 端到端走查脚本，按本地流程改（要装 Playwright）

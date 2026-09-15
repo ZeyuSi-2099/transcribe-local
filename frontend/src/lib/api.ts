@@ -809,16 +809,19 @@ export async function saveAdminP3Config(body: {
   return r.json();
 }
 
-// 工作流（仅管理员）：八个节点的静态配置视图。**后端只出事实、前端只出文案**——
-// 这里的每个数字都是后端 import 真实常量给的，前端一个都不许自己写死（写死就会漂）。
+// 工作流（仅管理员）：各节点的静态配置视图。**后端只出事实、前端只出文案**——
+// 这里的每个数字都是后端读实际生效的配置与常量给的，前端一个都不许自己写死（写死就会漂）。
+// 本机版（与线上不同）：线上描述云端流水线（派单前台指纹口径、任务镜像、27 门语种编排）；本机没有这些，
+// 换成本机流水线的参数与「设置」里的模型后端。
 export interface AdminPromptCard { path: string; lines: number; sha: string }
-export interface AdminLangPlan { lang: string; primary: string; refs: string[]; normalize: string | null }
+/** 模型后端（定字、术语库助手、后处理共用）。只有密钥变量名与设没设，后端从不下发密钥的值。 */
+export interface AdminModelBackend {
+  preset: string; kind: "openai" | "claude_p"; model: string; host: string;
+  local: boolean; webSearch: boolean; keyEnv: string; keySet: boolean;
+}
 export interface AdminWorkflow {
-  // dispatcher = 指纹取自派单前台这一份，不是 Fly 任务机器上跑的那一份（见后端模块头）
-  promptScope: string;
-  imageTag: string | null;
   prompts: Record<string, AdminPromptCard>;
-  langPlans: AdminLangPlan[];
+  backend: AdminModelBackend | null;
   params: Record<string, Record<string, unknown>>;
 }
 export async function getAdminWorkflow(): Promise<AdminWorkflow> {
@@ -847,14 +850,9 @@ export interface AdminHealth {
   p3: { tiers: Record<string, number>; total: number; degradedRatio: number | null; known: number };
   pp: Record<string, PpStepStat>;
   glossary: Record<string, NodeStat>;
-  // P0 转码 / P2 对齐。埋点跑在任务机器上，**重建 Fly 镜像之前恒为空**——
-  // 空在这里不等于「没跑」，界面上要说清是哪一种。
-  phases?: Record<string, NodeStat>;
+  // 本机版（与线上不同）：没有登录验证码用量、云机器台数、Claude 并发闸；P0/P2 本机不单独计时
   ops: {
-    loginSends24h: number | null; loginSendCapHint: number;
     watchdogRequeues: number | null;
-    gateSlots: Record<string, number | null>; gateLimit: number;
-    machinesRunning: number | null;
     recent60: { done: number | null; failed: number | null };
   };
   alerts: {
@@ -873,6 +871,22 @@ export interface AdminHealth {
 export async function getAdminHealth(hours = 24): Promise<AdminHealth> {
   const r = await fetch(`${BASE}/admin/health?hours=${hours}`, { headers: authHeaders() });
   if (!r.ok) throw new Error(`health ${r.status}`);
+  return r.json();
+}
+
+// 本机版独有：运行面板「资源」页签的「这台电脑」——模型、磁盘、内存、模型后端与数据去向。
+// 每一块取不到就是 null（那一格显示「—」），不让整页打不开。
+export interface AdminLocalResources {
+  models: { ready: boolean; items: { id: string; sizeMb: number; installed: boolean }[];
+            installedMb: number; missingMb: number; cacheDir: string } | null;
+  disk: { path: string; freeGb: number; totalGb: number; dataMb: number } | null;
+  memory: { totalMb: number; availableMb: number; reserveMb: number; parallel: number; parallelWhy: string } | null;
+  backend: AdminModelBackend | null;
+  dataFlow: DataFlowItem[];
+}
+export async function getAdminLocalResources(): Promise<AdminLocalResources> {
+  const r = await fetch(`${BASE}/admin/local-resources`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`local-resources ${r.status}`);
   return r.json();
 }
 

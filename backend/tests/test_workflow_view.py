@@ -7,41 +7,44 @@
 import datetime
 import hashlib
 
-from app import expiries, workflow_view
+from app import workflow_view
+
+expiries = None   # 本机版：证书与域名到期模块不搬（云端专属）；只有登记为不适用的用例用到它
 
 
 def test_params_come_from_real_constants_not_copies():
-    from pipeline import merge, orchestrator, pp_deepseek, pp_redact_ds, skill_merge
+    # 本机版（与线上不同）：本机流水线的参数在识别层配置里（默认配置叠上用户配置），后处理与术语库助手的在代码常量里
+    from pipeline import pp_deepseek, pp_redact_ds
+    from pipeline.local_orchestrator import config_path, tl_config
 
     from app import config, glossary_assist
 
+    cfg = tl_config.load(config_path())
     p = workflow_view.snapshot()["params"]
-    assert p["p3"]["model"] == skill_merge.CLAUDE_MODEL
-    assert p["p3"]["effort"] == skill_merge.CLAUDE_EFFORT
-    assert p["p3"]["args"] == merge.P3_ARGS
-    assert p["p3"]["script"] == merge.P3_SCRIPT
-    assert p["ppFlash"]["model"] == pp_deepseek.MODEL
-    assert p["ppFlash"]["narrateBudget"] == pp_deepseek.STEP1_BUDGET
-    assert p["ppFlash"]["dropFatal"] == pp_deepseek.DROP_FATAL
-    assert p["ppFlash"]["redactBudget"] == pp_redact_ds.BUDGET
-    assert p["ppFlash"]["redactPasses"] == pp_redact_ds.PASSES
-    assert p["pp"]["concurrency"] == config.PP_CLAUDE_MAX_CONCURRENCY
+    assert [e["id"] for e in p["p1"]["engines"]] == cfg["engines"]["enabled"]
+    assert p["p1"]["repeatThreshold"] == cfg["engines"]["circuit_breaker"]["repeat_threshold"]
+    assert p["p0"]["segmentation"] == cfg["diarize"]["segmentation"]
+    assert p["p0"]["chopMaxLength"] == cfg["chop"]["max_length"]
+    assert p["p2"]["fillers"] == cfg["divergence"]["fillers"]
+    assert p["p3"]["roundTokens"] == cfg["p3"]["round_tokens"]
+    assert p["p3"]["timeoutSec"] == cfg["p3"]["timeout"]
+    assert p["pp"]["narrateBudget"] == pp_deepseek.STEP1_BUDGET
+    assert p["pp"]["dropFatal"] == pp_deepseek.DROP_FATAL
+    assert p["pp"]["redactBudget"] == pp_redact_ds.BUDGET
+    assert p["pp"]["redactPasses"] == pp_redact_ds.PASSES
     assert p["pp"]["listMaxChars"] == config.PP_LIST_MAX_CHARS
-    assert "sceneTopN" not in p["p1"], "场景分流已取消，参数块不该再有它"
-    assert p["p1"]["rateCnyPerMin"] == orchestrator.RATE_CNY_PER_MIN
-    assert p["glossary"]["model"] == glossary_assist.MODEL
     assert p["glossary"]["maxEntries"] == glossary_assist.MAX_ENTRIES
 
 
-def test_local_script_constants_are_read_from_source():
-    """P0/P2 的常量是从脚本源码读的（那两个脚本不适合在 api 进程里 import）。
-    读不出来宁可缺这一格——所以这里只断言「读出来了、且是真值」。"""
+def test_local_script_constants_are_read_from_source(tmp_path, monkeypatch):
+    """显示的必须是**实际生效**的值。本机版（与线上不同）：线上这条读 vendor 脚本源码里的常量；
+    本机参数在配置里——用户配置改了块长，这里要跟着变，只读默认配置的话改完界面还显示旧值。"""
+    user = tmp_path / "config.yaml"
+    user.write_text("chop:\n  max_length: 24.0\n", encoding="utf-8")
+    monkeypatch.setenv("TRANSCRIBE_CONFIG", str(user))
     p = workflow_view.snapshot()["params"]
-    assert p["p0"]["AUDIO_FORMAT"] == "flac"
-    assert p["p0"]["TARGET_DURATION_MIN"] > 0
-    assert p["p0"]["SILENCE_THRESH_DB"] < 0          # 阈值是负分贝，正数说明解析串了
-    assert "zh" in p["p2"]["NO_SPACE_LANGS"]
-    assert p["p2"]["MAX_CANDIDATES"] > 0
+    assert p["p0"]["chopMaxLength"] == 24.0
+    assert p["p0"]["sampleRate"] == 16000
 
 
 def test_prompt_fingerprint_matches_the_file_we_serve():

@@ -20,18 +20,17 @@ pytestmark = pytest.mark.infra
 
 @pytest.fixture()
 def clean():
+    # 本机版（与线上不同）：没有登录，不建 login_codes 表，也就不清它
     db.init_schema()
     with db.connect() as conn:
         conn.execute("DELETE FROM postprocess_jobs")
         conn.execute("DELETE FROM jobs")
         conn.execute("DELETE FROM node_events")
-        conn.execute("DELETE FROM login_codes")
     yield
     with db.connect() as conn:
         conn.execute("DELETE FROM postprocess_jobs")
         conn.execute("DELETE FROM jobs")
         conn.execute("DELETE FROM node_events")
-        conn.execute("DELETE FROM login_codes")
 
 
 def _job(metrics: dict, status: str = "done", attempts: int = 1) -> str:

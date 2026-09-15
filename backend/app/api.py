@@ -213,6 +213,14 @@ async def admin_set_balance(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/admin/local-resources")
+def admin_local_resources(request: Request):
+    """本机版独有：运行面板「资源」页签——模型、磁盘、内存、模型后端与数据去向（线上这一页看云供应商与云机器）。"""
+    _admin_email(request)
+    from . import local_resources
+    return local_resources.snapshot()
+
+
 @app.get("/api/admin/p3-health")
 def admin_p3_health(request: Request, hours: int = 24):
     """P3 引擎（Claude 无头）健康度（仅管理员）：近 N 小时成败统计 + 当前撞顶冷却 + 在飞并发槽。

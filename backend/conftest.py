@@ -206,6 +206,13 @@ NOT_APPLICABLE = {
     "tests/test_create_job_integration.py::test_create_job_snapshots_the_rate_and_reserves_at_it": "上传时钉费率快照并预扣余额，本机不收费",
     "tests/test_create_job_integration.py::test_create_job_snapshots_the_same_rate_for_every_language": "同上",
     "tests/test_create_job_integration.py::test_create_job_insufficient_balance_402_no_job_balance_untouched": "同上",
+    # 运行面板（test_health_view_infra / test_workflow_view）
+    "tests/test_health_view_infra.py::test_login_sends_read_from_throttle_window": "登录验证码的发送量，本机不登录",
+    "tests/test_workflow_view.py::test_prompt_scope_is_declared": "线上指纹取自派单前台、跟任务机器上那份可能不同；本机只有一份，没有这个口径",
+    "tests/test_workflow_view.py::test_lang_plans_cover_every_shipped_language": "27 门语种各自的云端引擎编排，本机只有中文一套四路",
+    "tests/test_workflow_view.py::test_expiries_countdown_and_warn_flag": "云端凭证（Paddle、Claude 令牌）的到期清单，本机没有",
+    "tests/test_workflow_view.py::test_expiries_sorted_by_urgency": "同上",
+    "tests/test_workflow_view.py::test_bad_date_does_not_hide_the_row": "同上",
 }
 _HERE = Path(__file__).resolve().parent
 _na_hit: set[str] = set()

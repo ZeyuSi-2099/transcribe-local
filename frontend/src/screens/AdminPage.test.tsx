@@ -2,17 +2,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UILangProvider } from "../lib/i18n";
-import { getAdminOverview, getAdminBalances, getAdminExpiries, getAdminWorkflow, getAdminHealth,
+import { getAdminOverview, getAdminBalances, getAdminWorkflow, getAdminHealth,
          getAdminAlerts } from "../lib/api";
 
 // 本机版（与线上不同）：充值退款、用户、增长三组与「发增长周报」随功能一起去掉。
+// 运行面板本地化（2026-09-15）又去掉了这几组，本机没有这些功能：
+//   · 融合引擎健康度 / 认证失效 / 状态取最近一次 / 融合引擎配置 —— Claude 订阅的成败统计、探活、并发闸与强制档位，
+//     本机定字模型是「设置」里选的，没有订阅名额、没有降级阶梯、不起云机器探活；
+//   · 会到期的凭证、在飞机器容量 —— Paddle 与 Claude 令牌到期、Fly 机器数，本机都没有；
+//   · 待办条里的认证失效、撞顶降级、凭证临期、登录验证码用量、降级比例 —— 同上；
+//   · 工作流里的派单前台指纹口径、27 门语种编排、P0/P2「还没上机器」—— 本机只有一份代码、中文一套、不单独计时。
+// 换成本机的：「这台电脑」一栏、模型后端密钥没设与磁盘快满进待办条、工作流节点照本机流水线画、本机引擎代号照常显示。
+const probeSpy = vi.hoisted(() => vi.fn());
+const localResSpy = vi.hoisted(() => vi.fn());
 // setSpy 经 vi.hoisted 提升，工厂与用例都能访问；fixtures 放工厂内（避免 vi.mock 提升后引用未初始化变量）。
 const setSpy = vi.hoisted(() => vi.fn());
 const refundSpy = vi.hoisted(() => vi.fn());
-const p3HealthSpy = vi.hoisted(() => vi.fn());
-const p3ProbeSpy = vi.hoisted(() => vi.fn());
-const p3CfgSpy = vi.hoisted(() => vi.fn());
-const p3CfgSaveSpy = vi.hoisted(() => vi.fn());
 const alertHandledSpy = vi.hoisted(() => vi.fn());
 const growthReportSpy = vi.hoisted(() => vi.fn());
 const growthSpy = vi.hoisted(() => vi.fn());
@@ -49,11 +54,8 @@ vi.mock("../lib/api", () => {
       ],
     }),
     startAdminRefund: (...a: unknown[]) => refundSpy(...a),
-    getAdminP3Health: (...a: unknown[]) => p3HealthSpy(...a),
-    probeP3: (...a: unknown[]) => p3ProbeSpy(...a),
-    getAdminP3Config: (...a: unknown[]) => p3CfgSpy(...a),
-    saveAdminP3Config: (...a: unknown[]) => p3CfgSaveSpy(...a),
-    getAdminExpiries: vi.fn().mockResolvedValue({ warnDays: 60, items: [] }),
+    getAdminLocalResources: (...a: unknown[]) => localResSpy(...a),
+    probeBackend: (...a: unknown[]) => probeSpy(...a),
     getAdminAlerts: vi.fn().mockResolvedValue({ retentionDays: 180, items: [] }),
     getAdminUsers: vi.fn().mockResolvedValue({ adjustMaxCents: 5000, items: [] }),
     getAdminUserDetail: vi.fn(),
@@ -67,23 +69,40 @@ vi.mock("../lib/api", () => {
       windowHours: 24, baselineHours: 720, p1: {}, p1Baseline: {},
       p3: { tiers: {}, total: 0, degradedRatio: null, known: 0 },
       pp: {}, glossary: {},
-      ops: { loginSends24h: 0, loginSendCapHint: 100, watchdogRequeues: 0,
-             gateSlots: { claude: 0 }, gateLimit: 5, machinesRunning: 0,
-             recent60: { done: 0, failed: 0 } },
+      ops: { watchdogRequeues: 0, recent60: { done: 0, failed: 0 } },
       alerts: { engines: [], degrade: null },
     }),
     getAdminWorkflow: vi.fn().mockResolvedValue({
-      promptScope: "dispatcher", imageTag: "task-v23", langPlans: [],
-      prompts: { "multi-asr-merge": { path: "x/SKILL.md", lines: 132, sha: "abcd1234" } },
+      prompts: { "merge-saas": { path: "src/transcribe_local/_merge_zh.py · PROMPT_SAAS", lines: 132, sha: "abcd1234" } },
+      backend: null,
       params: {},
     }),
-    getAdminPrompt: vi.fn().mockResolvedValue({ id: "multi-asr-merge", path: "x", sha: "abcd1234", text: "规则正文" }),
+    getAdminPrompt: vi.fn().mockResolvedValue({ id: "merge-saas", path: "x", sha: "abcd1234", text: "规则正文" }),
   };
 });
 
 import { AdminPage } from "./AdminPage";
 
 const wrap = (ui: React.ReactNode) => render(<UILangProvider>{ui}</UILangProvider>);
+
+// 「这台电脑」的默认样子：一切正常（模型齐、磁盘够、钥匙设了）——这样别的用例的待办条不会被它带出噪音
+const BACKEND = (over: Record<string, unknown> = {}) => ({
+  preset: "deepseek", kind: "openai", model: "deepseek-flash", host: "api.deepseek.com",
+  local: false, webSearch: true, keyEnv: "DEEPSEEK_API_KEY", keySet: true, ...over,
+});
+const LOCAL_RES = (over: Record<string, unknown> = {}) => ({
+  models: { ready: true, items: [{ id: "firered_asr2", sizeMb: 1200, installed: true }, { id: "silero_vad", sizeMb: 2, installed: true }],
+            installedMb: 1202, missingMb: 0, cacheDir: "/Users/x/.cache/transcribe-local/models" },
+  disk: { path: "/Users/x/.transcribe-local", freeGb: 116.5, totalGb: 460.4, dataMb: 12.3 },
+  memory: { totalMb: 16384, availableMb: 3658, reserveMb: 4096, parallel: 3, parallelWhy: "自动" },
+  backend: BACKEND(),
+  dataFlow: [{ what: "audio", dest: "local", host: "" }, { what: "transcript", dest: "remote", host: "api.deepseek.com" }],
+  ...over,
+});
+beforeEach(() => {
+  localResSpy.mockReset().mockResolvedValue(LOCAL_RES());
+  probeSpy.mockReset();
+});
 
 // 四个 Tag 之后，各板块不再同屏——用例先切到它所在的 Tag。
 // 这不是「为了让测试通过而绕路」：真人也要先点这一下，测试就该照着点。
@@ -180,313 +199,6 @@ describe("AdminPage · 任务行主轨分片进度（新 primary 块 / 历史 g2
 });
 
 
-// ── 融合引擎健康度（P3·无头模式）─────────────────────────────────────────────
-// 订阅制没有余额可查，这张卡是成败统计。用例守三件事：状态判定不误报、
-// 我方限流不算进成功率分母、探活结果按 probeId 认领（不靠比时刻）。
-describe("AdminPage · 融合引擎健康度", () => {
-  const health = (over: Record<string, unknown> = {}) => ({
-    windowHours: 24,
-    counts: { ok: 9, capped: 1 },
-    attempted: 10,
-    successRate: 0.9,
-    capped: null,
-    authFailing: false,
-    authNote: null,
-    lastAttempt: "ok",
-    last: { at: "2026-08-07T09:00:00Z", source: "job", outcome: "ok", window: null, note: null, jobId: "j1" },
-    lastOkAt: "2026-08-07T09:00:00Z",
-    lastCappedAt: null,
-    lastCappedWindow: null,
-    activeSlots: 2,
-    slotLimit: 5,
-    ...over,
-  });
-
-  beforeEach(() => {
-    p3HealthSpy.mockReset();
-    p3ProbeSpy.mockReset();
-    p3HealthSpy.mockResolvedValue(health());
-  });
-
-  it("健康时显示成功率与在飞并发", async () => {
-    p3HealthSpy.mockResolvedValue(health({ counts: { ok: 10 }, attempted: 10, successRate: 1 }));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/^(正常|Healthy)$/)).toBeInTheDocument();
-    expect(screen.getByText(/10\/10 次成功|10\/10 succeeded/)).toBeInTheDocument();
-    expect(screen.getByText("2 / 5")).toBeInTheDocument();
-  });
-
-  it("撞顶时给出恢复时刻——运营要知道的是「还要多久」而不只是「坏了」", async () => {
-    p3HealthSpy.mockResolvedValue(health({
-      capped: { reason: "cap_5h", window: "five_hour", until: "2026-08-07T10:30:00Z" },
-    }));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/额度撞顶|Rate cap hit/)).toBeInTheDocument();
-  });
-
-  it("周额度撞顶与 5 小时窗口分开说（恢复时间差一个数量级）", async () => {
-    p3HealthSpy.mockResolvedValue(health({
-      capped: { reason: "cap_week", window: "seven_day", until: "2026-08-09T10:00:00Z" },
-    }));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/周额度撞顶|Weekly cap hit/)).toBeInTheDocument();
-  });
-
-  it("没有样本时说「无样本」，不是刺眼的 0%", async () => {
-    p3HealthSpy.mockResolvedValue(health({ counts: {}, attempted: 0, successRate: null, lastOkAt: null, last: null, lastAttempt: null }));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/无调用样本|No calls/)).toBeInTheDocument();
-  });
-
-  it("点探活即派机器；后端拒绝时把原因原样显示（501/503 各有含义）", async () => {
-    p3ProbeSpy.mockRejectedValue(new Error("机器池已满（转录优先），稍后再探"));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    await userEvent.click(await screen.findByRole("button", { name: /^(探活|Probe)$/ }));
-    expect(p3ProbeSpy).toHaveBeenCalled();
-    expect(await screen.findByText(/机器池已满/)).toBeInTheDocument();
-  });
-
-  it("探活结果按 probeId 认领：别人的事件不算数，自己的才算", async () => {
-    vi.useFakeTimers();
-    p3ProbeSpy.mockResolvedValue({ probeId: "probe-abc" });
-    try {
-      wrap(<AdminPage />);
-      goTag(TAG_WORKFLOW);
-      await vi.advanceTimersByTimeAsync(0);
-      fireEvent.click(screen.getByRole("button", { name: /^(探活|Probe)$/ }));
-      await vi.advanceTimersByTimeAsync(0);
-
-      // 轮询期间先来一条**别人的**事件（真实转录跑完写的）→ 不能被当成探活结果
-      p3HealthSpy.mockResolvedValue(health({
-        last: { at: "2026-08-07T09:05:00Z", source: "job", outcome: "ok", window: null, note: null, jobId: "other-job" },
-      }));
-      await vi.advanceTimersByTimeAsync(4100);
-      expect(screen.getByRole("button", { name: /探活中|Probing/ })).toBeInTheDocument();
-
-      // 自己那次回来了 → 结束等待并报结果
-      p3HealthSpy.mockResolvedValue(health({
-        last: { at: "2026-08-07T09:06:00Z", source: "probe", outcome: "ok", window: null, note: null, jobId: "probe-abc" },
-      }));
-      await vi.advanceTimersByTimeAsync(4100);
-      expect(screen.getByText(/探活通过|Probe passed/)).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("探活撞上并发满：说清楚「没打到引擎」，别误报成引擎坏了", async () => {
-    vi.useFakeTimers();
-    p3ProbeSpy.mockResolvedValue({ probeId: "probe-busy" });
-    try {
-      wrap(<AdminPage />);
-      goTag(TAG_WORKFLOW);
-      await vi.advanceTimersByTimeAsync(0);
-      fireEvent.click(screen.getByRole("button", { name: /^(探活|Probe)$/ }));
-      await vi.advanceTimersByTimeAsync(0);
-      p3HealthSpy.mockResolvedValue(health({
-        last: { at: "2026-08-07T09:06:00Z", source: "probe", outcome: "concurrency", window: null, note: null, jobId: "probe-busy" },
-      }));
-      await vi.advanceTimersByTimeAsync(4100);
-      expect(screen.getByText(/没打到引擎|never reached the engine/)).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-// 认证失效与撞顶是两件事：撞顶等着就好，这个不动手永远不会好——所以面板给的是动作不是描述。
-describe("AdminPage · 融合引擎认证失效", () => {
-  const authHealth = {
-    windowHours: 24,
-    counts: { ok: 3, auth: 2 },
-    attempted: 5,
-    successRate: 0.6,
-    capped: null,
-    authFailing: true,
-    authNote: "401 Unauthorized",
-    lastAttempt: "auth",
-    last: { at: "2026-08-07T09:00:00Z", source: "job", outcome: "auth", window: null, note: "401 Unauthorized", jobId: "j9" },
-    lastOkAt: "2026-08-07T06:00:00Z",
-    lastCappedAt: null,
-    lastCappedWindow: null,
-    activeSlots: 0,
-    slotLimit: 5,
-  };
-
-  beforeEach(() => {
-    p3ProbeSpy.mockReset();
-    p3HealthSpy.mockReset();
-    p3HealthSpy.mockResolvedValue(authHealth);
-  });
-
-  it("认证失效压过其它状态，并给出可执行的恢复步骤", async () => {
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/认证失效 · 需要人工处理|Auth failed/)).toBeInTheDocument();
-    expect(screen.getByText(/setup-token/)).toBeInTheDocument();          // 明确到命令，不让人猜
-    expect(screen.getByText(/转录没有中断|not down/)).toBeInTheDocument(); // 先安抚：生意没停
-    expect(screen.getByText(/401 Unauthorized/)).toBeInTheDocument();      // 引擎原话，便于定位
-  });
-
-  it("认证失效时不并排显示成功率——两个读数会自相矛盾", async () => {
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    await screen.findByText(/需要人工处理|needs you/);
-    expect(screen.queryByText(/\d+\/\d+ 次成功|\d+\/\d+ succeeded/)).not.toBeInTheDocument();
-  });
-
-  it("撞顶同时认证也坏：先说认证（撞顶会自愈，认证不会）", async () => {
-    p3HealthSpy.mockResolvedValue({
-      ...authHealth,
-      capped: { reason: "cap_5h", window: "five_hour", until: "2026-08-07T10:30:00Z" },
-    });
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/需要人工处理|needs you/)).toBeInTheDocument();
-    expect(screen.queryByText(/额度撞顶|Rate cap hit/)).not.toBeInTheDocument();
-  });
-});
-
-// 滚动窗口的平均值会被已经修好的故障一直拖着——状态得看「最近一次真打到引擎的结果」。
-describe("AdminPage · 融合引擎状态取最近一次而非窗口均值", () => {
-  const base = {
-    windowHours: 24, counts: { ok: 2, auth: 2 }, attempted: 4, successRate: 0.5,
-    capped: null, authFailing: false, authNote: null, lastAttempt: "ok",
-    last: { at: "2026-08-07T14:03:00Z", source: "job", outcome: "ok", window: null, note: null, jobId: "j1" },
-    lastOkAt: "2026-08-07T14:03:00Z", lastCappedAt: null, lastCappedWindow: null,
-    activeSlots: 0, slotLimit: 5,
-  };
-
-  beforeEach(() => { p3ProbeSpy.mockReset(); p3HealthSpy.mockReset(); });
-
-  it("故障已修好（最近一次成功）→ 说「已恢复」，不再报异常", async () => {
-    p3HealthSpy.mockResolvedValue(base);
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/^(已恢复|Recovered)$/)).toBeInTheDocument();
-    // 窗口里的失败不隐瞒，降级成副文本继续显示
-    expect(screen.getByText(/2\/4 次成功|2\/4 succeeded/)).toBeInTheDocument();
-  });
-
-  it("窗口全绿且最近一次成功 → 正常", async () => {
-    p3HealthSpy.mockResolvedValue({ ...base, counts: { ok: 4 }, attempted: 4, successRate: 1 });
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/^(正常|Healthy)$/)).toBeInTheDocument();
-  });
-
-  it("最近一次失败 → 异常，并点明是哪种失败", async () => {
-    p3HealthSpy.mockResolvedValue({ ...base, lastAttempt: "timeout", successRate: 0.9, counts: { ok: 9, timeout: 1 }, attempted: 10 });
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/异常 · 最近一次超时|Failing · last call Timeouts/)).toBeInTheDocument();
-  });
-
-  it("我方限流（冷却跳过/并发让路）不改写状态——它们不是引擎的锅", async () => {
-    // lastAttempt 只统计真打到引擎的结果，所以一串 preempt 之后状态仍由上一次真实调用决定
-    p3HealthSpy.mockResolvedValue({ ...base, counts: { ok: 2, auth: 2, preempt: 7 }, attempted: 4 });
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/^(已恢复|Recovered)$/)).toBeInTheDocument();
-    expect(screen.getByText(/冷却跳过 7|Skipped 7/)).toBeInTheDocument();
-  });
-});
-
-
-// ── 融合引擎配置（并发 / 机器数 / 强制引擎）─────────────────────────────────────
-const CFG = (over: Record<string, unknown> = {}) => ({
-  config: {
-    fly_max_machines: 50, max_transcribe_jobs: 40, claude_concurrency: 5,
-    force_engine: null, forceExpiresAt: null, updated_by: null, updatedAt: null, ...over,
-  },
-  limits: { claude: 5, pro: 500, flash: 2500, machines: 50 },
-  perMachineConc: 40,
-  forceMachines: { flash: 50 },
-  usage: {},
-  effectiveMaxMachines: 50,
-});
-
-describe("AdminPage · 融合引擎配置", () => {
-  beforeEach(() => {
-    p3CfgSpy.mockReset();
-    p3CfgSaveSpy.mockReset().mockResolvedValue({ ok: true });
-    p3HealthSpy.mockResolvedValue({
-      windowHours: 24, counts: {}, attempted: 0, successRate: null, capped: null,
-      authFailing: false, authNote: null, lastAttempt: null, last: null,
-      lastOkAt: null, lastCappedAt: null, lastCappedWindow: null, activeSlots: 0, slotLimit: 5,
-    });
-  });
-
-  it("转录任务数旁边显示的是**乘积**占账号上限几成——真正撞墙的是乘积不是台数本身", async () => {
-    p3CfgSpy.mockResolvedValue(CFG());
-    wrap(<AdminPage />);
-    goTag(TAG_RESOURCE);
-    // 转录 40 台 × 每机 40 路 = 1600 / 2500 = 64%
-    expect(await screen.findByText(/40 台 × 40 路 = 1600 \/ 2500/)).toBeTruthy();
-    expect(screen.getByText(/\(64%\)/)).toBeTruthy();
-  });
-
-  it("超过账号上限时标红并写明「超出账号上限」，而不是等保存后才报错", async () => {
-    p3CfgSpy.mockResolvedValue(CFG());
-    wrap(<AdminPage />);
-    goTag(TAG_RESOURCE);
-    const input = (await screen.findAllByRole("spinbutton"))[1];   // 转录任务数那一行
-    fireEvent.change(input, { target: { value: "70" } });          // 70 × 40 = 2800 > 2500
-    expect(await screen.findByText(/超出账号上限/)).toBeTruthy();
-  });
-
-  it("强制引擎只给 flash 一个选项——claude 是第一档强制无意义，pro 已摘除", async () => {
-    p3CfgSpy.mockResolvedValue(CFG());
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    expect(await screen.findByRole("button", { name: "flash" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "pro" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /claude/i })).toBeNull();
-  });
-
-  it("点强制引擎时带上时长（默认 4 小时）——强制态必须有到期时间，忘了关就是全量受影响", async () => {
-    p3CfgSpy.mockResolvedValue(CFG());
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    fireEvent.click(await screen.findByRole("button", { name: "flash" }));
-    expect(p3CfgSaveSpy).toHaveBeenCalledWith({ forceEngine: "flash", forceHours: 4 });
-  });
-
-  it("已强制时显示机器数与到期时刻，并警示影响所有真实订单", async () => {
-    p3CfgSpy.mockResolvedValue(CFG({
-      force_engine: "flash", forceExpiresAt: "2026-08-11T20:00:00Z",
-    }));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    // 50 台 × 40 = 2000，占 flash 账号上限 2500 的 80%（FORCE_MACHINES 派生值）
-    expect(await screen.findByText(/机器数自动压到 50 台/)).toBeTruthy();
-    expect(screen.getByText(/影响所有真实订单/)).toBeTruthy();
-    expect(screen.getByText(/到期自动恢复/)).toBeTruthy();
-  });
-
-  it("已强制时再点同一档 = 取消（回正常阶梯），不需要另找一个「关闭」按钮", async () => {
-    p3CfgSpy.mockResolvedValue(CFG({ force_engine: "flash", forceExpiresAt: "2026-08-11T20:00:00Z" }));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    fireEvent.click(await screen.findByRole("button", { name: /✓ flash/ }));
-    expect(p3CfgSaveSpy).toHaveBeenCalledWith({ forceEngine: null, forceHours: 4 });
-  });
-
-  it("后端校验失败要把原因原样显示出来——它写清了哪一项、为什么", async () => {
-    p3CfgSpy.mockResolvedValue(CFG());
-    p3CfgSaveSpy.mockRejectedValue(new Error("Pro 并发要在 1–10（20 台 × 50 路 = 1000 > 账号上限 500）"));
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    fireEvent.click(await screen.findByRole("button", { name: "flash" }));
-    expect(await screen.findByText(/账号上限 500/)).toBeTruthy();
-  });
-});
-
 describe("AdminPage · P3 成本按档位显示", () => {
   const withCost = (cost: Record<string, unknown>) => ({
     jobs: [], failures: [],
@@ -529,6 +241,30 @@ describe("AdminPage · P3 成本按档位显示", () => {
   });
 });
 
+// 本机版：本机引擎代号不在线上清单里。只按线上清单过滤的话，「各引擎」那一栏在本机永远是空的（修之前就是这样）。
+describe("AdminPage · 本机引擎代号", () => {
+  it("展开明细列出本机四路的状态与耗时；本机识别不花钱，不出一个空的「P1:」", async () => {
+    (getAdminOverview as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      jobs: [], failures: [],
+      recent: [{
+        id: "j1", fileName: "厨房对话.m4a", userEmail: "local@transcribe.local", doneAt: "09-15 09:48",
+        createdAt: "09-15 09:48", recordingType: "all", lang: "zh",
+        metrics: { durationSec: 48,
+                   engines: { FRED2: { status: "done", sec: 12.3 }, ZIPC: { status: "done", sec: 3.1 },
+                              PARA: { status: "done", sec: 2.4 }, QWEN3: { status: "failed", sec: null } },
+                   cost: { p1: {}, p3: 0.02, p3_engine: "deepseek-flash", total: 0.02 } },
+      }],
+      summary: { running: 0, queued: 0, doneToday: 1, failedToday: 0 },
+    });
+    wrap(<AdminPage />);
+    await userEvent.click(await screen.findByText("厨房对话.m4a"));
+    expect(screen.getByText(/FRED2 ✓ 12\.3s/)).toBeInTheDocument();
+    expect(screen.getByText(/QWEN3 ✗/)).toBeInTheDocument();
+    expect(screen.getByText(/P3 deepseek-flash ¥0\.02/)).toBeInTheDocument();
+    expect(screen.queryByText(/P1:/)).toBeNull();
+  });
+});
+
 
 describe("AdminPage · 后处理板块", () => {
   const PP = (over: Record<string, unknown> = {}) => ({
@@ -549,12 +285,13 @@ describe("AdminPage · 后处理板块", () => {
     return within(h.closest("section") ?? h.parentElement!.parentElement!);
   };
 
-  it("后处理是收费功能，运营页要看得到：文件、步骤、状态、价钱", async () => {
+  it("运营页要看得到后处理：文件、步骤、状态；本机不收费，不显示价钱", async () => {
     const box = await wrapWith([PP()]);
     expect(box.getByText("某访谈.flac")).toBeInTheDocument();
     expect(box.getByText("视角转换")).toBeInTheDocument();
     expect(box.getByText(/完成/)).toBeInTheDocument();
-    expect(box.getByText("$2.00")).toBeInTheDocument();
+    expect(box.queryByText("$2.00")).toBeNull();
+    expect(box.getByText("API 花费")).toBeInTheDocument();
   });
 
   it("降级的步要打标——用户说「这份不如上次」时，运营一眼看出来，不用翻日志", async () => {
@@ -618,43 +355,27 @@ describe("AdminPage · 待办条", () => {
     .mockResolvedValueOnce([{ vendor: "X", label: "X", category: "infra", payMode: "postpaid",
       unit: "cny", sortOrder: 1, amountCny: null, thresholdCny: null, source: "manual",
       note: null, updatedAt: "", low: false }]);
-  const quiet = {
-    windowHours: 24, counts: { ok: 3 }, attempted: 3, successRate: 1, capped: null,
-    authFailing: false, authNote: null, lastAttempt: "ok", last: null,
-    lastOkAt: null, lastCappedAt: null, lastCappedWindow: null, activeSlots: 0, slotLimit: 5,
-  };
 
-  beforeEach(() => {
-    p3HealthSpy.mockReset().mockResolvedValue(quiet);
-    (getAdminExpiries as unknown as ReturnType<typeof vi.fn>)
-      .mockReset().mockResolvedValue({ warnDays: 60, items: [] });
-  });
-
-  it("认证失效要进来——它不动手永远不会好", async () => {
-    p3HealthSpy.mockResolvedValue({ ...quiet, authFailing: true });
-    wrap(<AdminPage />);
-    expect(await screen.findByText(/认证失效/)).toBeInTheDocument();
-    expect(screen.getByText(/需要处理 \d+ 件/)).toBeInTheDocument();
-  });
-
-  it("撞顶降级不进来——它会自愈；这一条是整条待办条的分寸所在", async () => {
+  // 本机版：线上排第一的是「Claude 订阅认证失效」；本机对应的是模型后端要的钥匙没设——同样是不动手永远不会好
+  it("模型后端要的密钥没设要进来，并写明哪个变量、影响哪几环", async () => {
     noBalanceIssue();
-    p3HealthSpy.mockResolvedValue({
-      ...quiet, capped: { reason: "cap_5h", window: "five_hour", until: "2026-08-14T10:00:00Z" },
-    });
+    localResSpy.mockResolvedValue(LOCAL_RES({ backend: BACKEND({ keySet: false }) }));
+    wrap(<AdminPage />);
+    expect(await screen.findByText(/deepseek-flash 要的环境变量 DEEPSEEK_API_KEY 没设 —— 定字、术语库助手、后处理都调不通/)).toBeInTheDocument();
+  });
+
+  it("本机模型不要密钥——变量名空着也不报", async () => {
+    noBalanceIssue();
+    localResSpy.mockResolvedValue(LOCAL_RES({ backend: BACKEND({ local: true, keyEnv: "", keySet: false, host: "127.0.0.1" }) }));
     wrap(<AdminPage />);
     expect(await screen.findByText(/没有需要处理的事/)).toBeInTheDocument();
   });
 
-  it("凭证临期进来，并写明到期后会发生什么（只说「快到期」人不会动手）", async () => {
+  it("磁盘快满要进来——录音和稿子都写在这台电脑上，转到一半写不下就是一单白跑", async () => {
     noBalanceIssue();
-    (getAdminExpiries as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      warnDays: 60,
-      items: [{ id: "k", vendor: "Paddle", what: "PADDLE_API_KEY", expires: "2026-09-01",
-                impact: "充值静默失败", fix: "重建 key", source: "manual", daysLeft: 18, warn: true }],
-    });
+    localResSpy.mockResolvedValue(LOCAL_RES({ disk: { path: "/x", freeGb: 3.2, totalGb: 460, dataMb: 1 } }));
     wrap(<AdminPage />);
-    expect(await screen.findByText(/PADDLE_API_KEY 还有 18 天到期 —— 充值静默失败/)).toBeInTheDocument();
+    expect(await screen.findByText(/磁盘只剩 3\.2 GB/)).toBeInTheDocument();
   });
 
   it("余额低于阈值进来（默认 fixtures 里 DeepSeek/博查 都低）", async () => {
@@ -690,7 +411,8 @@ describe("AdminPage · 待办条", () => {
       queuedMaxHours: 24,
     });
     wrap(<AdminPage />);
-    expect(await screen.findByText(/1 单排队已超 7 小时（满 24 小时判失败/)).toBeInTheDocument();
+    expect(await screen.findByText(/1 单排队已超 7 小时（满 24 小时判失败）/)).toBeInTheDocument();
+    expect(screen.queryByText(/返还预扣/)).toBeNull();   // 本机不收费，没有预扣可返
   });
 
   it("同因失败达阈值才报——5 单失败是 5 个问题还是同一个炸了 5 次，这个差别决定要不要立刻动手", async () => {
@@ -778,62 +500,91 @@ describe("AdminPage · 任务流", () => {
     // 所以按行取，别用全局唯一匹配
     const timeCell = await screen.findByText(/排队中 8:00:00/);
     const card = timeCell.parentElement!.parentElement!;      // 时间格 → 表头行 → 整张任务卡
-    expect(within(card).getByText(/满 24 小时判失败并返还预扣/)).toBeInTheDocument();
+    expect(within(card).getByText(/满 24 小时判失败/)).toBeInTheDocument();
+    expect(within(card).queryByText(/返还预扣/)).toBeNull();
   });
 });
 
 // ── 工作流 Tag ────────────────────────────────────────────────────────────────
 describe("AdminPage · 工作流节点", () => {
   const WF = (over: Record<string, unknown> = {}) => ({
-    promptScope: "dispatcher", imageTag: "task-v23-redactds", langPlans: [
-      // 2026-08-26 起 GEM 挂在全部 27 门上，样本跟着实际阵容走（收起态正好显示 zh + en 两行）
-      { lang: "zh", primary: "ELV", refs: ["DB", "FA", "XF", "GEM"], normalize: "zh" },
-      { lang: "en", primary: "ELV", refs: ["AAI", "DB", "GEM"], normalize: "" },
-    ],
     prompts: {
-      "pp-redact": { path: ".claude/skills/pp-redact/SKILL.md", lines: 382, sha: "de891035" },
+      "pp-redact": { path: "backend/pipeline/_pp_prompts.py · PP_REDACT", lines: 382, sha: "de891035" },
+      "merge-saas": { path: "src/transcribe_local/_merge_zh.py · PROMPT_SAAS", lines: 132, sha: "abcd1234" },
     },
-    params: { ppFlash: { redactBudget: 6000, model: "deepseek-flash" }, pp: { concurrency: 5 } },
+    backend: BACKEND(),
+    params: {
+      p1: { engines: [{ id: "firered_asr2", tag: "FRED2", route: "AED 自回归" }, { id: "paraformer_2023", tag: "PARA", route: "非自回归" }],
+            parallel: 3, numThreads: 2, repeatThreshold: 10, maxRetry: 3 },
+      p3: { workflow: "two_stage", roundTokens: 2100, timeoutSec: 1200 },
+      pp: { redactBudget: 6000, redactConc: 6, redactPasses: 1, narrateBudget: 6000 },
+    },
     ...over,
   });
+  const nodeOf = (title: HTMLElement) => title.parentElement!.parentElement!.parentElement!;
 
   beforeEach(() => {
     (getAdminWorkflow as unknown as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(WF());
-    p3HealthSpy.mockReset().mockResolvedValue({
-      windowHours: 24, counts: {}, attempted: 0, successRate: null, capped: null,
-      authFailing: false, authNote: null, lastAttempt: null, last: null, lastOkAt: null,
-      lastCappedAt: null, lastCappedWindow: null, activeSlots: 0, slotLimit: 5,
-    });
-    p3CfgSpy.mockReset().mockResolvedValue(CFG());
   });
 
-  it("后处理每一步各占一个节点——它们各有各的闸，合成一块会把差别藏进小字", async () => {
+  it("节点照本机流水线画：术语库助手 · 转码与切块 · 多路 ASR · 分歧册 · 融合 · 后处理两步", async () => {
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
-    expect(await screen.findByText("后处理 · 视角转换")).toBeInTheDocument();
-    expect(screen.getByText("后处理 · 脱敏")).toBeInTheDocument();
+    for (const title of ["术语库助手", "P0 转码与切块", "P1 多路 ASR", "分歧册", "P3 融合", "后处理 · 视角转换", "后处理 · 脱敏"]) {
+      expect(await screen.findByText(title)).toBeInTheDocument();
+    }
+    // 云端那几样本机没有，留着会让人去查一条不存在的链路
+    expect(screen.queryByText("P2 对齐")).toBeNull();
+    expect(screen.queryByText(/派单前台/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(探活|Probe)$/ })).toBeNull();
   });
 
-  it("归类已下架：工作流里不再有这个节点（留着会让运营去查一条不存在的链路）", async () => {
+  it("P3 默认展开，写明用的是哪个模型后端、钥匙设没设", async () => {
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
-    await screen.findByText("后处理 · 视角转换");
-    expect(screen.queryByText("后处理 · 归类")).toBeNull();
-    expect(screen.queryByText(/无降级路，撞顶只能等/)).toBeNull();
+    const node = nodeOf(await screen.findByText("P3 融合"));
+    expect(within(node).getByText(/模型后端 deepseek-flash @ api\.deepseek\.com/)).toBeInTheDocument();
+    expect(within(node).getByText(/DEEPSEEK_API_KEY 读取 · 已设置/)).toBeInTheDocument();
+    expect(within(node).getByText(/2100 tok/)).toBeInTheDocument();
   });
 
-  it("P3 默认展开——它是唯一有实时状态和可执行动作的节点，不该比改造前更难找", async () => {
+  it("本机模型不显示钥匙那一行——它根本不要钥匙，写「未设置」会吓人", async () => {
+    (getAdminWorkflow as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      WF({ backend: BACKEND({ model: "qwen3:8b", host: "127.0.0.1", local: true, keyEnv: "", keySet: false }) }));
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
-    expect(await screen.findByRole("button", { name: /^(探活|Probe)$/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /融合引擎配置|Merge engine settings/ })).toBeInTheDocument();
+    const node = nodeOf(await screen.findByText("P3 融合"));
+    expect(within(node).getAllByText(/qwen3:8b · 本机/).length).toBeGreaterThan(0);
+    expect(within(node).queryByText(/密钥从环境变量/)).toBeNull();
   });
 
-  it("参数来自后端给的真实常量，前端不自己写死", async () => {
+  it("Claude 订阅：定字写 claude -p，术语库助手与后处理标「用不了」", async () => {
+    (getAdminWorkflow as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      WF({ backend: BACKEND({ kind: "claude_p", model: "opus", host: "", keyEnv: "", keySet: false }),
+           params: { ...WF().params, p3: { claudeModel: "opus", claudeEffort: "medium", claudeTimeoutSec: 3600 } } }));
+    wrap(<AdminPage />);
+    goTag(TAG_WORKFLOW);
+    const p3 = nodeOf(await screen.findByText("P3 融合"));
+    expect(within(p3).getByText(/claude -p · --model opus · --effort medium/)).toBeInTheDocument();
+    const title = screen.getByText("后处理 · 脱敏");
+    fireEvent.click(title);
+    expect(within(nodeOf(title)).getByText(/用不了：这一环要 API 或本机模型/)).toBeInTheDocument();
+  });
+
+  it("P1 列出本机引擎代号与解码路线——排查某一路时第一眼要看的就是它", async () => {
+    wrap(<AdminPage />);
+    goTag(TAG_WORKFLOW);
+    expect(await screen.findByText(/2 台本机引擎 · 同时跑 3 台/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("P1 多路 ASR"));
+    expect(await screen.findByText("firered_asr2 · AED 自回归")).toBeInTheDocument();
+    expect(screen.getByText("FRED2")).toBeInTheDocument();
+  });
+
+  it("参数来自后端给的真实配置，前端不自己写死", async () => {
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
     fireEvent.click(await screen.findByText("后处理 · 脱敏"));
-    expect(await screen.findByText(/每批 6000 字/)).toBeInTheDocument();
+    expect(await screen.findByText(/每批 6000 字 · 并发 6 · 扫 1 遍/)).toBeInTheDocument();
   });
 
   it("提示词带路径·行数·指纹，并能看全文——只显示内容而不带指纹是假的安心", async () => {
@@ -845,48 +596,10 @@ describe("AdminPage · 工作流节点", () => {
     expect(await screen.findByText("规则正文")).toBeInTheDocument();
   });
 
-  it("顶部写明指纹取自派单前台那一份——双头部署下它不证明线上跑的是这一份", async () => {
+  it("顶部写明参数口径：这台电脑上实际生效的配置", async () => {
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/task-v23-redactds/)).toBeInTheDocument();
-    expect(screen.getByText(/取自派单前台这一份/)).toBeInTheDocument();
-  });
-
-  it("27 门语种编排只读可见——排查某语言质量问题时第一眼要看的就是它", async () => {
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    fireEvent.click(await screen.findByText("P1 多路 ASR"));
-    // 收起态显示 zh + en 两行，所以主轨 ELV 会出现两次
-    expect(await screen.findAllByText("ELV")).toHaveLength(2);
-    expect(screen.getByText(/1\. DB.*2\. FA.*3\. XF.*4\. GEM/)).toBeInTheDocument();
-    // 非中文也要跑 GEM（2026-08-26 起全 27 门）——这一路少了是静默降质，界面上得看得见
-    expect(screen.getByText(/1\. AAI.*2\. DB.*3\. GEM/)).toBeInTheDocument();
-  });
-});
-
-// ── 资源 · 会到期的凭证 ───────────────────────────────────────────────────────
-describe("AdminPage · 会到期的凭证", () => {
-  it("倒计时 + 到期后会发生什么 + 怎么换，三样都要有", async () => {
-    (getAdminExpiries as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      warnDays: 60,
-      items: [{ id: "k", vendor: "Anthropic", what: "CLAUDE_CODE_OAUTH_TOKEN", expires: "2027-08-07",
-                impact: "P3 融合全线降级", fix: "claude setup-token 重新生成", source: "manual",
-                daysLeft: 358, warn: false }],
-    });
-    wrap(<AdminPage />);
-    goTag(TAG_RESOURCE);
-    expect(await screen.findByText("CLAUDE_CODE_OAUTH_TOKEN")).toBeInTheDocument();
-    expect(screen.getByText(/还有 358 天 · 2027-08-07/)).toBeInTheDocument();
-    expect(screen.getByText(/P3 融合全线降级/)).toBeInTheDocument();
-    expect(screen.getByText(/claude setup-token 重新生成/)).toBeInTheDocument();
-  });
-
-  it("机器数上限搬到资源了——它管的是全站在飞机器，不是融合那一环的参数", async () => {
-    p3CfgSpy.mockReset().mockResolvedValue(CFG());
-    wrap(<AdminPage />);
-    goTag(TAG_RESOURCE);
-    expect(await screen.findByText(/在飞机器容量|Machine capacity/)).toBeInTheDocument();
-    expect(screen.getByText(/转录机与后处理机共用/)).toBeInTheDocument();
+    expect(await screen.findByText(/实际生效的配置/)).toBeInTheDocument();
   });
 });
 
@@ -898,9 +611,7 @@ const HEALTH = (over: Record<string, unknown> = {}) => ({
   p1: {}, p1Baseline: {},
   p3: { tiers: {}, total: 0, degradedRatio: null, known: 0 },
   pp: {}, glossary: {},
-  ops: { loginSends24h: 0, loginSendCapHint: 100, watchdogRequeues: 0,
-         gateSlots: { claude: 0 }, gateLimit: 5, machinesRunning: 0,
-         recent60: { done: 0, failed: 0 } },
+  ops: { watchdogRequeues: 0, recent60: { done: 0, failed: 0 } },
   alerts: { engines: [], degrade: null },
   ...over,
 });
@@ -911,15 +622,7 @@ describe("AdminPage · 节点近况", () => {
   beforeEach(() => {
     (getAdminHealth as unknown as ReturnType<typeof vi.fn>).mockReset();
     setHealth();
-    (getAdminWorkflow as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      promptScope: "dispatcher", imageTag: "t", langPlans: [], prompts: {}, params: {},
-    });
-    p3HealthSpy.mockReset().mockResolvedValue({
-      windowHours: 24, counts: {}, attempted: 0, successRate: null, capped: null,
-      authFailing: false, authNote: null, lastAttempt: null, last: null, lastOkAt: null,
-      lastCappedAt: null, lastCappedWindow: null, activeSlots: 0, slotLimit: 5,
-    });
-    p3CfgSpy.mockReset().mockResolvedValue(CFG());
+    (getAdminWorkflow as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ prompts: {}, backend: null, params: {} });
   });
 
   it("引擎成功率跟基线并排显示——光说 78% 没用，得说「平时 99%」", async () => {
@@ -944,21 +647,25 @@ describe("AdminPage · 节点近况", () => {
     expect(screen.getByText("0.8s")).toBeInTheDocument();
   });
 
-  it("P3 显示出稿档位与降级率——降级率是判断额度够不够的直接依据", async () => {
-    setHealth({ p3: { tiers: { opus: 6, flash: 4 }, total: 10, degradedRatio: 0.4, known: 10 } });
+  // 本机版：模型是「设置」里选的，没有「第一档 / 降级」之分——只列各模型出了几单，不算降级率
+  it("P3 列出各模型出了几单，不算降级率", async () => {
+    setHealth({ p3: { tiers: { "deepseek-flash": 6, "qwen3:8b": 4 }, total: 10, degradedRatio: 1, known: 10 } });
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
-    expect(await screen.findByText(/降级率 40%（10 单可判定）/)).toBeInTheDocument();
+    // 各档写在各自的 span 里，按整个节点的文字断言
+    const node = (await screen.findByText("P3 融合")).parentElement!.parentElement!.parentElement!;
+    await waitFor(() => expect(node.textContent).toMatch(/出稿模型\s*deepseek-flash 6\s*·\s*qwen3:8b 4/));
+    expect(screen.queryByText(/降级率/)).toBeNull();
   });
 
-  it("后处理按步分开显示降级次数与花的钱，不汇总", async () => {
-    setHealth({ pp: { redact: { total: 5, ok: 4, failed: 1, degraded: 2, dsCostCny: 3.4 } } });
+  it("后处理按步分开显示成败，不汇总", async () => {
+    setHealth({ pp: { redact: { total: 5, ok: 4, failed: 1, degraded: 0, dsCostCny: 0 } } });
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
     fireEvent.click(await screen.findByText("后处理 · 脱敏"));
     // 注意：断言里用 \s* 而不是全角空格——testing-library 会把全角空格归一成普通空格
     expect(await screen.findByText(/4\/5 成功/)).toBeInTheDocument();
-    expect(screen.getByText(/降级 2\s*¥3\.40/)).toBeInTheDocument();
+    expect(screen.getByText(/失败 1/)).toBeInTheDocument();
   });
 
   it("术语库助手要看 P95 不只是 P50——它前一百多秒一个字不吐，用户在等", async () => {
@@ -979,30 +686,16 @@ describe("AdminPage · 节点近况", () => {
     expect(await within(node).findByText(/窗口内没有样本/)).toBeInTheDocument();
   });
 
-  // **空格子有两种，界面上必须能分辨**：一种是「窗口内真的没样本」，另一种是
-  // 「埋点写好了但跑在任务机器上，重建 Fly 镜像之前恒为空」。混成同一句话的话，
-  // 运营看到 P2 空着只能猜是没人用还是没上线——而这两件事该做的动作完全相反。
-  it("P0/P2 没数时说清是「还没上机器」，不是「没有样本」", async () => {
+  // **空格子有两种，界面上必须能分辨**：一种是「窗口内真的没样本」，另一种是「本机根本不单独记这一段」。
+  // 混成同一句话的话，看到分歧册空着只能猜是没人用还是没记——而这两件事该做的动作完全不同。
+  it("转码与切块、分歧册没数时说清是「本机不单独计时」，不是「没有样本」", async () => {
     wrap(<AdminPage />);
     goTag(TAG_WORKFLOW);
-    const title = await screen.findByText("P2 对齐");
+    const title = await screen.findByText("分歧册");
     fireEvent.click(title);
     const node = title.parentElement!.parentElement!.parentElement!;
-    expect(await within(node).findByText(/重建镜像之前这里恒为空/)).toBeInTheDocument();
+    expect(await within(node).findByText(/本机不单独记这一段的耗时/)).toBeInTheDocument();
     expect(within(node).queryByText(/窗口内没有样本/)).toBeNull();
-  });
-
-  it("P0/P2 有数就显示耗时，且 P95 与 P50 并排（要看的是尾部）", async () => {
-    setHealth({ phases: { p2: { total: 12, ok: 11, p50Ms: 96000, p95Ms: 402000 } } });
-    wrap(<AdminPage />);
-    goTag(TAG_WORKFLOW);
-    const title = await screen.findByText("P2 对齐");
-    fireEvent.click(title);
-    const node = title.parentElement!.parentElement!.parentElement!;
-    expect(await within(node).findByText(/P50 96s\s*P95 402s/)).toBeInTheDocument();
-    // 失败也要看得见：只显示成功数的话，「这一段经常挂」跟「很健康」长得一样
-    expect(within(node).getByText(/失败 1/)).toBeInTheDocument();
-    expect(within(node).queryByText(/重建镜像之前/)).toBeNull();
   });
 });
 
@@ -1011,43 +704,77 @@ describe("AdminPage · 运行信号与新增待办", () => {
     (getAdminHealth as unknown as ReturnType<typeof vi.fn>).mockReset();
     setHealth();
     (getAdminBalances as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (getAdminExpiries as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ warnDays: 60, items: [] });
-    p3HealthSpy.mockReset().mockResolvedValue({
-      windowHours: 24, counts: {}, attempted: 0, successRate: null, capped: null,
-      authFailing: false, authNote: null, lastAttempt: null, last: null, lastOkAt: null,
-      lastCappedAt: null, lastCappedWindow: null, activeSlots: 0, slotLimit: 5,
-    });
-    p3CfgSpy.mockReset().mockResolvedValue(CFG());
   });
 
   it("引擎悄悄坏了进待办条——这是唯一能提前发现它的信号", async () => {
-    setHealth({ alerts: { engines: [{ tag: "XF", pct: 78, basePct: 99, ok: 31, total: 40 }], degrade: null } });
+    setHealth({ alerts: { engines: [{ tag: "QWEN3", pct: 78, basePct: 99, ok: 31, total: 40 }], degrade: null } });
     wrap(<AdminPage />);
-    expect(await screen.findByText(/XF 近 24h 成功率 78%（平时 99%，31\/40）/)).toBeInTheDocument();
+    expect(await screen.findByText(/QWEN3 近 24h 成功率 78%（平时 99%，31\/40）/)).toBeInTheDocument();
   });
 
-  it("一直在降级进待办条——它跟「单次撞顶」不同，那个自愈，这个要人决定升档还是调闸", async () => {
-    setHealth({ alerts: { engines: [], degrade: { ratio: 0.62, known: 21 } } });
-    wrap(<AdminPage />);
-    expect(await screen.findByText(/62% 的单降级出稿（21 单可判定）/)).toBeInTheDocument();
-  });
-
-  it("发码逼近供应商免费额度进待办条——撞上限就是所有人都登不进", async () => {
-    setHealth({ ops: { ...HEALTH().ops, loginSends24h: 85 } });
-    wrap(<AdminPage />);
-    expect(await screen.findByText(/已发出 85\/100 封登录验证码/)).toBeInTheDocument();
-  });
-
-  it("资源页显示四把闸、在飞机器、看门狗回收——此前只显示了一把闸和上限", async () => {
-    setHealth({ ops: { ...HEALTH().ops, machinesRunning: 3, watchdogRequeues: 2,
-                       gateSlots: { claude: 2, pp_narrate: 0, pp_categorize: 1, pp_redact: 0 } } });
+  it("资源页的运行信号只留本机有的：看门狗回收、近 60 分钟", async () => {
+    setHealth({ ops: { watchdogRequeues: 2, recent60: { done: 5, failed: 1 } } });
     wrap(<AdminPage />);
     goTag(TAG_RESOURCE);
-    expect(await screen.findByText(/claude 2\/5.*pp_redact 0\/5/)).toBeInTheDocument();
-    // 「在飞机器」与「在飞机器容量」同页，用精确匹配区分标签与那张配置卡的标题
-    const label = screen.getByText(/^(在飞机器|Machines in flight)$/);
-    expect(within(label.parentElement!).getByText("3")).toBeInTheDocument();
-    expect(screen.getByText(/看门狗回收/)).toBeInTheDocument();
+    const label = await screen.findByText(/^看门狗回收 · 近 24h$/);
+    expect(within(label.parentElement!).getByText("2")).toBeInTheDocument();
+    expect(screen.getByText(/5 完成\s*1 失败/)).toBeInTheDocument();
+    // 云端才有的几行不再出现
+    expect(screen.queryByText(/登录验证码/)).toBeNull();
+    expect(screen.queryByText(/^在飞机器$/)).toBeNull();
+    expect(screen.queryByText(/并发闸在飞/)).toBeNull();
+    expect(screen.queryByText(/在飞机器容量|会到期的凭证/)).toBeNull();
+  });
+});
+
+// ── 资源 · 这台电脑（本机版独有）──────────────────────────────────────────────
+describe("AdminPage · 这台电脑", () => {
+  it("模型、存放位置、磁盘、内存、模型后端、数据去哪都在一栏里", async () => {
+    wrap(<AdminPage />);
+    goTag(TAG_RESOURCE);
+    expect(await screen.findByRole("heading", { name: "这台电脑" })).toBeInTheDocument();
+    expect(await screen.findByText(/已装齐 2 个 · 1\.2 GB/)).toBeInTheDocument();
+    expect(screen.getByText(/转录与结果占 12\.3 MB/)).toBeInTheDocument();
+    expect(screen.getByText("/Users/x/.transcribe-local")).toBeInTheDocument();
+    expect(screen.getByText("116.5 / 460.4 GB")).toBeInTheDocument();
+    expect(screen.getByText(/共 16\.0 GB · 此刻可用 3\.6 GB/)).toBeInTheDocument();
+    expect(screen.getByText("deepseek-flash @ api.deepseek.com")).toBeInTheDocument();
+    const flow = screen.getByTestId("panel-data-flow");
+    expect(within(flow).getByText("不离开这台电脑")).toHaveAttribute("data-dest", "local");
+    expect(within(flow).getByText("发给 api.deepseek.com")).toHaveAttribute("data-dest", "remote");
+  });
+
+  it("模型不全时写还缺几个、多大", async () => {
+    localResSpy.mockResolvedValue(LOCAL_RES({ models: { ready: false, installedMb: 1200, missingMb: 2048, cacheDir: "/c",
+      items: [{ id: "a", sizeMb: 1200, installed: true }, { id: "b", sizeMb: 2048, installed: false }] } }));
+    wrap(<AdminPage />);
+    goTag(TAG_RESOURCE);
+    expect(await screen.findByText(/还缺 1 个 · 2\.0 GB/)).toBeInTheDocument();
+  });
+
+  it("钥匙没设时写「未设置」——只报设没设，不报值", async () => {
+    localResSpy.mockResolvedValue(LOCAL_RES({ backend: BACKEND({ keySet: false }) }));
+    wrap(<AdminPage />);
+    goTag(TAG_RESOURCE);
+    const section = (await screen.findByRole("heading", { name: "这台电脑" })).parentElement!.parentElement!;
+    expect(await within(section).findByText(/DEEPSEEK_API_KEY 读取 · 未设置/)).toBeInTheDocument();
+  });
+
+  it("测试连接真去问一次后端，连不上把原因原样写出来", async () => {
+    probeSpy.mockResolvedValue({ ok: false, why: "HTTP 401" });
+    wrap(<AdminPage />);
+    goTag(TAG_RESOURCE);
+    fireEvent.click(await screen.findByRole("button", { name: "测试连接" }));
+    expect(await screen.findByText("连不上：HTTP 401")).toBeInTheDocument();
+    expect(probeSpy).toHaveBeenCalled();
+  });
+
+  it("本机资源读不到，其余板块照常——资源页是出事时去看的地方，不能跟着一起塌", async () => {
+    localResSpy.mockRejectedValue(new Error("local-resources 500"));
+    wrap(<AdminPage />);
+    goTag(TAG_RESOURCE);
+    expect(await screen.findByText("读不到本机资源")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "运行信号" })).toBeInTheDocument();
   });
 });
 
@@ -1135,11 +862,6 @@ describe("AdminPage · 告警记录", () => {
 describe("AdminPage · 待办条只接「要动手」那一档", () => {
   beforeEach(() => {
     (getAdminAlerts as unknown as ReturnType<typeof vi.fn>).mockReset();
-    p3HealthSpy.mockReset().mockResolvedValue({
-      windowHours: 24, counts: { ok: 3 }, attempted: 3, successRate: 1, capped: null,
-      authFailing: false, authNote: null, lastAttempt: "ok", last: null, lastOkAt: null,
-      lastCappedAt: null, lastCappedWindow: null, activeSlots: 0, slotLimit: 5,
-    });
   });
 
   it("未处理的「要动手」告警进待办条", async () => {
