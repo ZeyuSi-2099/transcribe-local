@@ -1,6 +1,6 @@
 [project]
 name = "transcribe-local"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "四台本地开源 ASR 转同一段录音，分歧交给大模型定字"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -12,8 +12,6 @@
 
 ---
 
-> ⚠️ **尚未发布。** 这个仓库正在建设中，还不能用。
-
 ## 它做什么
 
 把一段中文访谈录音，在本机变成一份带说话人、带时间戳、标了存疑处的转录稿。
@@ -169,7 +167,7 @@ transcribe-local serve        # 起本机服务，自动开浏览器
 
 安装包里自带构建好的界面，不用装 Node。Python ≥ 3.10，**CPU 就够，不需要显卡**。
 
-还没发布到 PyPI。在那之前从源码跑，要装 Node 把界面构建一次：
+想改代码、或者跟最新的改动，就从源码跑。要装 Node 把界面构建一次：
 
 ```bash
 git clone https://github.com/ZeyuSi-2099/transcribe-local && cd transcribe-local
